@@ -1241,67 +1241,62 @@ function previewExcel() {
           wn.forEach(n => allNodes.add(n));
         });
       } else {
-        let hasValid = false;
-        dataRows.slice(0, 5).forEach(r => { for (let j = 2; j < r.length; j++) { if (isValidNode(r[j])) { hasValid = true; break; } } });
-        if (hasValid) {
-          formatDetected = '標準格式（A=座號 B=姓名 C+=節點名稱）';
-          dataRows.forEach(r => {
-            if (!r[0] || !String(r[0]).trim()) return;
-            let num = String(r[0]).trim(), name = String(r[1] || '').trim();
-            const wn = [];
-            for (let j = 2; j < r.length; j++) { const v = String(r[j] || '').trim(); if (isValidNode(v)) wn.push(v); }
-            students.push({ number: num, name, weakNodes: wn });
-            wn.forEach(n => allNodes.add(n));
-          });
-        } else {
-          // ✨ v13.8：因材網原始格式自動解析
-          // 結構：列1=節點名稱（每8欄一個節點，從第7欄起）
-          //       列3=子欄標題（第7+0=答對率, 第7+6=狀態, 第7+7=答對率(節點)）
-          //       列4起=學生資料
-          // 每節點佔8欄：答對率,次數,完成率,次數,完成率,次數,狀態,答對率
-          // 弱點條件：狀態=未精熟 OR 答對率(節點欄)<60
+        // ✨ v13.9 修正：先偵測因材網格式，再判斷標準格式
+        // 因材網特徵：dataRows[0][0]='學生' 且 dataRows[0][1]='作答次數'
+        const isAdaptLearn = String(dataRows[0]?.[0] || '').trim() === '學生' &&
+                             String(dataRows[0]?.[1] || '').trim() === '作答次數';
+        if (isAdaptLearn) {
+          // 因材網格式：自動解析弱點節點
+          // 結構：列1=節點名稱（每8欄一個，從index 6起）
+          // 每節點偏移：+0答對率 +1次數 +2完成率 +3次數 +4完成率 +5次數 +6狀態 +7答對率(節點)
+          // 弱點條件：狀態=未精熟 OR 答對率(節點)<60
           formatDetected = '因材網原始格式（自動解析弱點節點）';
-
-          // Step1：從列1找出節點名稱及其起始欄位（0-based index）
-          const nodeMap = []; // [{name, colStart}]
+          // Step1：從列1找節點（每8欄一個，從欄6起）
+          const nodeMap = [];
           const row1 = dataRows[0] || [];
           for (let ci = 6; ci < row1.length; ci += 8) {
             const cellVal = String(row1[ci] || '').trim();
-            if (cellVal && cellVal.length > 3 && !['練習題','影片','節點','學科領域學習夥伴','完成率'].includes(cellVal)) {
-              // 取節點名稱：去掉前綴編號，只留描述部分
-              // 格式如：4-Ⅲ-1-06-01 字形[六]/字體字形1 → 字形[六]/字體字形1
-              const match = cellVal.match(/^[\w\-Ⅰ-Ⅹ]+\s+(.+)$/);
-              const nodeName = match ? match[1].trim() : cellVal;
+            if (cellVal && cellVal.length > 3 &&
+                !['練習題','影片','節點','學科領域學習夥伴','完成率','答對率','次數','狀態'].includes(cellVal)) {
+              const m = cellVal.match(/^[A-Za-z0-9\-\u2160-\u2169]+\s+(.+)$/);
+              const nodeName = (m ? m[1] : cellVal).trim();
               if (nodeName.length >= 3) nodeMap.push({ name: nodeName, colStart: ci });
             }
           }
-
-          // Step2：解析每位學生，找弱點節點
-          dataRows.slice(1).forEach(r => {
+          // Step2：從第4列起（跳過3列標題）解析學生
+          dataRows.slice(3).forEach(r => {
             if (!r[0] || !String(r[0]).trim()) return;
             const raw = String(r[0]).trim();
-            // 解析座號姓名：格式 "6年 3班 5號 吳禾荃"
             const numMatch = raw.match(/(\d+年\s*\d+班\s*\d+號)/);
-            const nameMatch = raw.match(/\d+號\s*([一-龥]+)$/);
+            const nameMatch = raw.match(/\d+號\s*([\u4e00-\u9fa5]+)$/);
             const num = numMatch ? numMatch[1].replace(/\s/g, '') : raw;
             const name = nameMatch ? nameMatch[1] : '';
-
             const weakNodes = [];
             nodeMap.forEach(({ name: nodeName, colStart }) => {
-              // 每節點8欄：[答對率,次數,完成率,次數,完成率,次數,狀態,答對率(節點)]
-              const statusVal = String(r[colStart + 6] || '').trim(); // 狀態欄（+6）
-              const scoreVal  = r[colStart + 7]; // 答對率(節點)欄（+7）
+              const statusVal = String(r[colStart + 6] || '').trim();
+              const scoreVal  = r[colStart + 7];
               const score = (scoreVal === '-' || scoreVal === null || scoreVal === undefined)
                 ? null : Number(scoreVal);
-
-              const isWeak = statusVal === '未精熟' ||
-                             (score !== null && !isNaN(score) && score < 60);
-              if (isWeak) weakNodes.push(nodeName);
+              if (statusVal === '未精熟' || (score !== null && !isNaN(score) && score < 60))
+                weakNodes.push(nodeName);
             });
-
             students.push({ number: num, name, weakNodes });
             weakNodes.forEach(n => allNodes.add(n));
           });
+        } else {
+          let hasValid = false;
+          dataRows.slice(0, 5).forEach(r => { for (let j = 2; j < r.length; j++) { if (isValidNode(r[j])) { hasValid = true; break; } } });
+          if (hasValid) {
+            formatDetected = '標準格式（A=座號 B=姓名 C+=節點名稱）';
+            dataRows.forEach(r => {
+              if (!r[0] || !String(r[0]).trim()) return;
+              let num = String(r[0]).trim(), name = String(r[1] || '').trim();
+              const wn = [];
+              for (let j = 2; j < r.length; j++) { const v = String(r[j] || '').trim(); if (isValidNode(v)) wn.push(v); }
+              students.push({ number: num, name, weakNodes: wn });
+              wn.forEach(n => allNodes.add(n));
+            });
+          } else { formatDetected = '因材網原始格式（無法直接使用）'; }
         }
       }
       app.excelStudents = students; app.excelNodes = [...allNodes];
