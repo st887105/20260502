@@ -1,10 +1,10 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <!-- 版號更新為 v13.6：GAS URL 以 DEFAULT 為唯一依據 + Claude Worker 格式修正 -->
-  <title>車城國小｜學力檢測 AI 智慧補救系統 (v13.6)</title>
+  <!-- 版號更新為 v13.7：Claude Worker 格式對齊（mode=questions/worksheet）-->
+  <title>車城國小｜學力檢測 AI 智慧補救系統 (v13.7)</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -500,7 +500,7 @@
 
 <footer class="mt-4">
   <div class="container px-3">
-    車城國小資訊老師 @ Google Gemini 協作設計 ｜ v13.6 ｜
+    車城國小資訊老師 @ Google Gemini 協作設計 ｜ v13.7 ｜
     <a href="https://github.com/st887105/20260404" target="_blank"><i class="fa-brands fa-github me-1"></i>原始碼</a>
   </div>
 </footer>
@@ -745,12 +745,12 @@ const API = {
 
   // ✨ v13.4：Claude Worker 直呼叫（前端直連，無 GAS 超時限制）
   // Worker 持有自己的 Claude API key，前端不需傳 Gemini key
-  // Worker 接受格式：POST { action, nodes, grade, subject } 或 { action, topNodes, grade, subject }
-  _callClaude: async (action, data = {}) => {
+  // Worker 路由：body.mode = 'worksheet' | 'questions'
+  _callClaude: async (mode, data = {}) => {
     const workerUrl = app.claudeWorkerUrl;
     if (!workerUrl) throw new Error('Claude Worker 網址未設定，請至⚙️設定頁輸入');
-    // 直接把 action 和 data 的欄位攤平送給 Worker
-    const payload = Object.assign({ action }, data);
+    // Worker 用 mode 欄位來路由，攤平 data 的其他欄位
+    const payload = Object.assign({ mode }, data);
     try {
       const resp = await fetch(workerUrl, {
         method: 'POST',
@@ -794,7 +794,21 @@ const API = {
   getTaskResults:(n)=>API._call('getTaskResults',{taskName:n}),
   analyzeClassWeakNodes:(n)=>API._call('analyzeClassWeakNodes',{taskName:n}),
   generateTeachingWorksheet:(n,g,s)=>API._call('generateTeachingWorksheet',{topNodes:n,grade:g,subject:s}),
-  generateTeachingWorksheetClaude:(n,g,s)=>API._callClaude('generateWorksheet',{topNodes:n,grade:g,subject:s}),
+  // 學習單：Worker 需要 mode='worksheet' + prompt 字串
+  // 前端自行組好 prompt，讓 Worker 直接呼叫 Claude
+  generateTeachingWorksheetClaude: async (topNodes, grade, subject) => {
+    const nodeList = (topNodes || []).slice(0, 3).map((n, i) => `${i + 1}. ${n}`).join('\n');
+    const isChinese = subject === '國語';
+    const prompt = isChinese
+      ? `請為「${grade}」學生設計一份 A4 補救學習單（完整 HTML 格式）。\n弱點節點：\n${nodeList}\n\n要求：\n1. 包含閱讀文本、字詞練習、閱讀理解題（Level C/B/A 各2題）、解答欄\n2. 使用 CSS 讓版面美觀，適合列印\n3. 輸出完整 HTML（包含 <!DOCTYPE html>）`
+      : `請為「${grade}」學生設計一份 A4 補救學習單（完整 HTML 格式）。\n弱點節點：\n${nodeList}\n\n要求：\n1. 包含概念說明、例題、練習題（Level C/B/A 各2題）、解答欄\n2. 使用 CSS 讓版面美觀，適合列印\n3. 輸出完整 HTML（包含 <!DOCTYPE html>）`;
+    const systemPrompt = isChinese
+      ? '你是台灣國小國語文教師，擅長閱讀理解差異化補救教學。'
+      : '你是台灣國小數學科教師，擅長差異化補救教學。';
+    const result = await API._callClaude('worksheet', { prompt, systemPrompt, maxTokens: 4096 });
+    // Worker 學習單回傳 { status:'success', content:'<html>...' }
+    return result.content || result;
+  },
   getGeminiSettings:()=>API._call('getGeminiSettings'),
   updateGeminiSettings:(m,p,pwd)=>API._call('updateGeminiSettings',{model:m,isPaid:p,pwd}),
   getQuestionErrorRates:(n)=>API._call('getQuestionErrorRates',{taskName:n}),
@@ -808,8 +822,9 @@ const API = {
   deleteTask:(n,pwd)=>API._call('deleteTask',{taskName:n,pwd}),
 
   // ✨ v13.4：Claude Worker 題庫生成（一次生成所有節點，無批次超時）
+  // Worker 路由：mode='questions'，需要 nodes/grade/subject/qcount
   generateAllBatchClaude: async (nodes, grade, subject) => {
-    return API._callClaude('generateQuestions', { nodes, grade, subject });
+    return API._callClaude('questions', { nodes, grade, subject, qcount: 3 });
   },
 };
 
