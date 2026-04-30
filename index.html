@@ -780,6 +780,7 @@ const API = {
   getTasks:()=>API._call('getTasks'),
   getTasksDirect:()=>API._callDirect('getTasks'),
   getStudents:(n)=>API._call('getStudents',{taskName:n}),
+  getStudentsDirect:(n)=>API._callDirect('getStudents',{taskName:n}),
   verifyAdmin:(p)=>API._call('verifyAdmin',{pwd:p}),
   getQuizSettings:()=>API._call('getQuizSettings'),
   updateQuizSettings:(c)=>API._call('updateQuizSettings',{count:c}),
@@ -816,6 +817,7 @@ const API = {
   getQuestionErrorRates:(n)=>API._call('getQuestionErrorRates',{taskName:n}),
   getPracticeQuestionsForErrors:(n)=>API._call('getPracticeQuestionsForErrors',{taskName:n}),
   getTaskQuestions:(n)=>API._call('getTaskQuestions',{taskName:n}),
+  getTaskQuestionsDirect:(n)=>API._callDirect('getTaskQuestions',{taskName:n}),
   getHelpUrl:()=>API._call('getHelpUrl'),
   updateHelpUrl:(url,pwd)=>API._call('updateHelpUrl',{url,pwd}),
   saveWorksheetToCloud:(n,g,s,h)=>API._call('saveWorksheetToCloud',{taskName:n,grade:g,subject:s,htmlContent:h}),
@@ -1134,7 +1136,8 @@ async function onTaskChange() {
   numSel.innerHTML = '<option value="">-- 載入中… --</option>';
   if (!taskName) { numSel.innerHTML = '<option value="">-- 請先選任務 --</option>'; return; }
   try {
-    app.studentList = await API.getStudents(taskName);
+    // 使用 Direct 跳過 Worker 快取，確保學生選單即時更新
+    app.studentList = await API.getStudentsDirect(taskName);
     if (!app.studentList.length) { numSel.innerHTML = '<option value="">-- 此任務無學生資料 --</option>'; return; }
     numSel.innerHTML = '<option value="">-- 請選擇姓名 --</option>' +
       app.studentList.map(s => `<option value="${esc(s.number)}">${esc(formatStudentLabel(s))}</option>`).join('');
@@ -1436,7 +1439,8 @@ async function loadBankStatus() {
     const questionCounts = {};
     await Promise.allSettled(tasks.map(async task => {
       try {
-        const res = await API.getTaskQuestions(task.taskName);
+        // 使用 Direct 跳過 Worker 快取，確保看到最新題目數
+        const res = await API.getTaskQuestionsDirect(task.taskName);
         questionCounts[task.taskName] = (res.questions || []).length;
       } catch(e) { questionCounts[task.taskName] = -1; }
     }));
@@ -1533,7 +1537,8 @@ async function deleteTask(taskName) {
 async function previewStudentList(taskName) {
   Swal.fire({ title: '載入學生名單…', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
   try {
-    const students = await API.getStudents(taskName); Swal.close();
+    // 使用 Direct 跳過 Worker 快取，確保顯示最新學生名單
+    const students = await API.getStudentsDirect(taskName); Swal.close();
     if (!students || !students.length) { return Swal.fire({ icon: 'info', title: '此任務無學生資料' }); }
     const tbody = students.map((s, i) => `<tr><td class="text-muted small">${i + 1}</td><td>${esc(s.number)}</td><td class="fw-bold text-primary">${esc(formatStudentLabel(s))}</td><td class="small">${(s.weakNodes || []).slice(0, 3).map(n => `<span class="weak-node-badge">${esc(n)}</span>`).join('')}</td></tr>`).join('');
     Swal.fire({ title: `「${taskName}」學生名單`, html: `<div class="text-start"><div class="alert alert-info py-1 px-2 small mb-2">共 <b>${students.length}</b> 位學生｜姓名已去識別化顯示</div><div style="max-height:420px;overflow-y:auto;"><table class="table table-sm table-bordered table-hover mb-0"><thead class="table-primary sticky-top"><tr><th>#</th><th>座號</th><th>匿名姓名</th><th>弱點節點</th></tr></thead><tbody>${tbody}</tbody></table></div></div>`, confirmButtonText: '關閉', width: '660px' });
@@ -1543,7 +1548,8 @@ async function previewStudentList(taskName) {
 async function previewBankQuestions(taskName) {
   Swal.fire({ title: '載入題目預覽…', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
   try {
-    const res = await API.getTaskQuestions(taskName); Swal.close();
+    // 使用 Direct 跳過 Worker 快取，確保顯示最新題目
+    const res = await API.getTaskQuestionsDirect(taskName); Swal.close();
     const qs = res.questions || [];
     if (!qs.length) { return Swal.fire({ icon: 'info', title: '題庫尚無題目', text: '請先點「重新出題」建立題庫。' }); }
     const byLevel = { A: 0, B: 0, C: 0, D: 0 };
