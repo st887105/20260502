@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <!-- 版號更新為 v13.9：整合版 - 因材網自動解析 + 題庫管理 + 刪除任務 + Claude Worker -->
+  <!-- 版號 v13.9：整合版 - 因材網自動解析 + 題庫管理 + 刪除任務 + Claude Worker -->
+  <!-- fix: 出題完成後即時刷新題庫管理卡片 + 學生登入任務選單 -->
   <title>車城國小｜學力檢測 AI 智慧補救系統 (v13.9)</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -79,11 +80,9 @@
     footer{background:#fff;border-top:1px solid #e0e0e0;padding:10px 0;font-size:.78rem;color:#9e9e9e;text-align:center;}
     footer a{color:#9e9e9e;text-decoration:none;}
     footer a:hover{color:var(--primary);}
-    /* 節點預設選項樣式 */
     .node-preset-btn{display:inline-block;margin:3px;padding:4px 12px;border-radius:16px;border:1.5px solid #90caf9;background:#e3f2fd;color:#1565c0;font-size:.82rem;cursor:pointer;transition:all .18s;}
     .node-preset-btn:hover,.node-preset-btn.active{background:var(--primary);border-color:var(--primary);color:#fff;}
     .gas-url-input{font-size:.78rem;font-family:monospace;padding:6px 10px;border-radius:8px;border:1px solid #ced4da;background:#f8f9fa;}
-    /* ✨ v13.4 新增：AI 引擎選擇樣式 */
     .ai-engine-selector{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0;}
     .ai-engine-btn{display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:20px;border:2px solid #e0e0e0;background:#fff;font-size:.85rem;cursor:pointer;transition:all .18s;font-weight:600;}
     .ai-engine-btn:hover{border-color:var(--primary);background:#f0f8ff;}
@@ -153,7 +152,6 @@
         <button class="btn btn-success btn-lg w-100" onclick="adminLogin()">
           <i class="fa-solid fa-lock-open me-2"></i>登入後台 <i class="fa-solid fa-user-shield ms-1"></i>
         </button>
-        <!-- GAS URL 設定區（僅部署新版本時需要修改） -->
         <div class="mt-3 p-2 border rounded bg-light" id="gas-url-config-area">
           <div class="d-flex justify-content-between align-items-center mb-1">
             <span class="small fw-bold text-muted"><i class="fa-solid fa-link me-1"></i>GAS 後端網址 <span class="badge bg-success ms-1" style="font-size:.65rem;">自動連線</span></span>
@@ -202,7 +200,6 @@
             <div class="tab-pane fade show active" id="tab-wizard">
               <div class="alert alert-success py-2 px-3 small mb-3"><b>🚀 快速設定精靈</b>：不需要 Excel，直接輸入學生資料與弱點節點，一鍵建立任務並出題。</div>
 
-              <!-- ✨ v13.4：AI 引擎選擇 -->
               <div class="card border-0 p-3 mb-3" style="background:linear-gradient(135deg,#e8f4fd,#f3f0ff);">
                 <h6 class="fw-bold mb-2"><i class="fa-solid fa-robot me-1"></i>選擇 AI 出題引擎</h6>
                 <div class="ai-engine-selector">
@@ -292,7 +289,6 @@
                   </div>
                 </div>
 
-                <!-- ✨ v13.4：AI 引擎選擇（Excel 上傳區） -->
                 <div class="col-12">
                   <div class="card border-0 p-3" style="background:linear-gradient(135deg,#e8f4fd,#f3f0ff);">
                     <h6 class="fw-bold mb-2"><i class="fa-solid fa-robot me-1"></i>選擇 AI 出題引擎</h6>
@@ -335,7 +331,7 @@
               </div>
             </div>
 
-            <!-- ===== 題庫管理 Tab（完全保留原本） ===== -->
+            <!-- ===== 題庫管理 Tab ===== -->
             <div class="tab-pane fade" id="tab-bank"><div id="bank-status"><div class="text-muted small">點擊「題庫管理」標籤載入…</div></div></div>
 
             <!-- ===== 成績 Tab ===== -->
@@ -352,7 +348,6 @@
                 <div class="ws-mgmt-card">
                   <h6><i class="fa-solid fa-file-lines me-1"></i>AI 差異化補教講義</h6>
 
-                  <!-- ✨ v13.4：學習單引擎選擇 -->
                   <div class="card border-0 p-2 mb-3" style="background:linear-gradient(135deg,#fff8e1,#f3f0ff);border-radius:10px;">
                     <div class="small fw-bold text-muted mb-2"><i class="fa-solid fa-robot me-1"></i>學習單生成引擎</div>
                     <div class="ai-engine-selector">
@@ -419,7 +414,6 @@
                       <div class="form-check mt-1"><input class="form-check-input" type="checkbox" id="setting-is-paid"><label class="form-check-label small" for="setting-is-paid">付費帳號（解除速率限制）</label></div>
                     </div>
                     <hr>
-                    <!-- ✨ v13.4：Claude Worker 設定 -->
                     <div class="mb-3 p-2 border border-purple rounded" style="border-color:#7c3aed!important;background:#faf5ff;">
                       <label class="form-label text-muted small fw-bold"><i class="fa-solid fa-wand-magic-sparkles me-1" style="color:#7c3aed;"></i>Claude Worker 網址 <span class="claude-badge">v13.4</span></label>
                       <div class="input-group input-group-sm">
@@ -511,29 +505,19 @@
 // ==========================================
 // ⚙️ 全域設定 - GAS URL
 // ==========================================
-// ★ 每次部署新版 GAS 後，只需要修改這一行 ★
 const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbyE9_f1Kno9TQN4DIibHeg9xs1T69GleiS-mBxa76OwHGTYfKv3XsBzI-_ic1l_Ts-f/exec';
-
-// ★ Cloudflare Worker Proxy（解決無痕模式 + Google 帳號登入的 CORS 問題）★
 const WORKER_URL = 'https://gas-proxy.sunny-f0b.workers.dev';
-
-// ✨ v13.4：Claude Worker（前端直呼叫，無 GAS 30 秒超時，用於題庫生成＋學習單）
 const DEFAULT_CLAUDE_WORKER_URL = 'https://20260501claude-worksheet.sunny-f0b.workers.dev';
 
-// 規則：DEFAULT_GAS_URL 是唯一權威來源。
-// 每次 DEFAULT 改變（代表部署了新 GAS），自動清除舊 localStorage，不再打到舊後端。
-// 使用者「套用新網址」時才允許覆蓋，且記錄當時的 DEFAULT 供下次比對。
 function _loadGasUrl() {
   try {
     const saved = localStorage.getItem('gasUrl');
     const savedDefault = localStorage.getItem('gasUrlDefault');
-    // DEFAULT 已更新 → 清除舊存值，強制使用新 DEFAULT
     if (savedDefault && savedDefault !== DEFAULT_GAS_URL) {
       localStorage.removeItem('gasUrl');
       localStorage.removeItem('gasUrlDefault');
       return DEFAULT_GAS_URL;
     }
-    // 使用者曾明確設定過自訂網址才採用
     if (saved && saved !== DEFAULT_GAS_URL) return saved;
     return DEFAULT_GAS_URL;
   } catch(e) { return DEFAULT_GAS_URL; }
@@ -541,7 +525,6 @@ function _loadGasUrl() {
 function _saveGasUrlToStorage(url) {
   try {
     localStorage.setItem('gasUrl', url);
-    // 記錄「設定時的 DEFAULT」，供下次偵測是否過期
     localStorage.setItem('gasUrlDefault', DEFAULT_GAS_URL);
   } catch(e) {}
 }
@@ -561,10 +544,9 @@ const app = {
   startTime:0, timerInterval:null,
   excelStudents:[], excelNodes:[],
   wsHtml:'', wsPreviewOpen: false,
-  // ✨ v13.4：引擎狀態（'gas' | 'claude'）
-  wizEngine: 'gas',   // 快速精靈引擎
-  upEngine: 'gas',    // Excel 上傳引擎
-  wsEngine: 'gas',    // 學習單引擎
+  wizEngine: 'gas',
+  upEngine: 'gas',
+  wsEngine: 'gas',
 };
 
 const app_sim = { data: null, taskName: '', previewOpen: false };
@@ -587,7 +569,7 @@ const WAITING_MSGS=['☕ 泡杯茶放鬆，AI 正努力為學生出題中…','�
 let _rotatorInterval=null, _rotMsgIdx=0, _waitStart=0;
 
 // ==========================================
-// ✨ v13.4：引擎切換 UI 控制
+// ✨ 引擎切換 UI 控制
 // ==========================================
 function setWizEngine(mode) {
   app.wizEngine = mode;
@@ -600,7 +582,6 @@ function setUpEngine(mode) {
   document.getElementById('up-engine-gas').className = 'ai-engine-btn' + (mode==='gas'?' gas-active':'');
   document.getElementById('up-engine-claude').className = 'ai-engine-btn' + (mode==='claude'?' claude-active':'');
   document.getElementById('up-claude-note').style.display = mode==='claude' ? '' : 'none';
-  // PDF / 混合模式在 claude 引擎下灰掉提示
   const folderArea = document.getElementById('folder-input-area');
   if (mode === 'claude' && folderArea) folderArea.style.display = 'none';
 }
@@ -611,14 +592,13 @@ function setWsEngine(mode) {
 }
 
 // ==========================================
-// 🔗 GAS URL 快速修改（首頁功能）
+// 🔗 GAS URL 快速修改
 // ==========================================
 function _initGasUrlDisplay() {
   const display = document.getElementById('gas-url-display');
   const input = document.getElementById('gas-url-input');
   if (display) display.textContent = app.gasUrl.length > 60 ? app.gasUrl.substring(0, 55) + '…' : app.gasUrl;
   if (input) input.value = app.gasUrl;
-  // 初始化 Claude Worker URL 顯示
   const cwDisplay = document.getElementById('current-claude-worker-url');
   const cwInput = document.getElementById('setting-claude-worker-url');
   if (cwDisplay) cwDisplay.textContent = app.claudeWorkerUrl;
@@ -680,7 +660,6 @@ const API = {
     const isLarge = payloadStr.length > 1500 || action === 'uploadTaskData' || action === 'saveWorksheetToCloud';
 
     if (!isLarge) {
-      // 優先：透過 Cloudflare Worker 轉發
       try {
         const workerResp = await fetch(
           WORKER_URL + '?payload=' + encodeURIComponent(payloadStr),
@@ -694,7 +673,6 @@ const API = {
         console.warn('[API] Worker 失敗，降級使用 JSONP：', workerErr.message);
       }
 
-      // Fallback：JSONP 直連 GAS
       return new Promise((resolve, reject) => {
         const cbName = '_gas_cb_' + Date.now() + '_' + Math.floor(Math.random() * 99999);
         let isDone = false;
@@ -724,7 +702,6 @@ const API = {
       });
 
     } else {
-      // 大資料：text/plain POST 直打 GAS
       try {
         const resp = await fetch(app.gasUrl, {
           method: 'POST',
@@ -743,13 +720,9 @@ const API = {
     }
   },
 
-  // ✨ v13.4：Claude Worker 直呼叫（前端直連，無 GAS 超時限制）
-  // Worker 持有自己的 Claude API key，前端不需傳 Gemini key
-  // Worker 路由：body.mode = 'worksheet' | 'questions'
   _callClaude: async (mode, data = {}) => {
     const workerUrl = app.claudeWorkerUrl;
     if (!workerUrl) throw new Error('Claude Worker 網址未設定，請至⚙️設定頁輸入');
-    // Worker 用 mode 欄位來路由，攤平 data 的其他欄位
     const payload = Object.assign({ mode }, data);
     try {
       const resp = await fetch(workerUrl, {
@@ -764,7 +737,6 @@ const API = {
       const json = await resp.json();
       if (json.error) throw new Error(json.error);
       if (json.status === 'error') throw new Error(json.message || 'Worker 回報錯誤');
-      // Worker 可能直接回傳結果（html string / questions array）或包在 data 裡
       return json.data !== undefined ? json.data : json;
     } catch(err) {
       if (err.message.startsWith('Worker HTTP') || err.message.includes('Worker 回報')) throw err;
@@ -794,8 +766,6 @@ const API = {
   getTaskResults:(n)=>API._call('getTaskResults',{taskName:n}),
   analyzeClassWeakNodes:(n)=>API._call('analyzeClassWeakNodes',{taskName:n}),
   generateTeachingWorksheet:(n,g,s)=>API._call('generateTeachingWorksheet',{topNodes:n,grade:g,subject:s}),
-  // 學習單：Worker 需要 mode='worksheet' + prompt 字串
-  // 前端自行組好 prompt，讓 Worker 直接呼叫 Claude
   generateTeachingWorksheetClaude: async (topNodes, grade, subject) => {
     const nodeList = (topNodes || []).slice(0, 3).map((n, i) => `${i + 1}. ${n}`).join('\n');
     const isChinese = subject === '國語';
@@ -806,7 +776,6 @@ const API = {
       ? '你是台灣國小國語文教師，擅長閱讀理解差異化補救教學。'
       : '你是台灣國小數學科教師，擅長差異化補救教學。';
     const result = await API._callClaude('worksheet', { prompt, systemPrompt, maxTokens: 4096 });
-    // Worker 學習單回傳 { status:'success', content:'<html>...' }
     return result.content || result;
   },
   getGeminiSettings:()=>API._call('getGeminiSettings'),
@@ -818,11 +787,7 @@ const API = {
   updateHelpUrl:(url,pwd)=>API._call('updateHelpUrl',{url,pwd}),
   saveWorksheetToCloud:(n,g,s,h)=>API._call('saveWorksheetToCloud',{taskName:n,grade:g,subject:s,htmlContent:h}),
   getWorksheetFromCloud:(n,g,s)=>API._call('getWorksheetFromCloud',{taskName:n,grade:g,subject:s}),
-  // ✨ v13.5：刪除任務（清除 Tasks 列、Students 列、Bank 題目、Results、History）
   deleteTask:(n,pwd)=>API._call('deleteTask',{taskName:n,pwd}),
-
-  // ✨ v13.4：Claude Worker 題庫生成（一次生成所有節點，無批次超時）
-  // Worker 路由：mode='questions'，需要 nodes/grade/subject/qcount
   generateAllBatchClaude: async (nodes, grade, subject) => {
     return API._callClaude('questions', { nodes, grade, subject, qcount: 3 });
   },
@@ -872,7 +837,6 @@ window.addEventListener('DOMContentLoaded', () => {
 // ==========================================
 // 🏫 精靈（Wizard）功能
 // ==========================================
-
 function updateWizNodePresets() {
   const grade = document.getElementById('wiz-grade')?.value || '五年級';
   const subject = document.getElementById('wiz-subject')?.value || '數學';
@@ -987,7 +951,7 @@ async function wizardInitDB() {
   }
 }
 
-/** 精靈：建立任務並出題（支援 GAS / Claude Worker 雙引擎）*/
+/** ✅ v13.9-fix：精靈建立任務並出題（完成後即時刷新題庫管理 + 學生登入選單）*/
 async function wizardCreateAndGenerate() {
   const taskName = document.getElementById('wiz-task-name')?.value.trim() || '';
   const grade = document.getElementById('wiz-grade')?.value || '';
@@ -1016,7 +980,6 @@ async function wizardCreateAndGenerate() {
   startProgress(pMsg, pEl);
 
   try {
-    // 步驟1：永遠透過 GAS 儲存名冊（無超時風險）
     await API.uploadTaskData(taskName, grade, subject, students, uniqueNodes);
     if (pBar) pBar.style.width = '10%';
     if (pMsg) pMsg.textContent = '✅ 名冊已儲存，開始 AI 出題…';
@@ -1024,13 +987,11 @@ async function wizardCreateAndGenerate() {
     const effectiveNodes = uniqueNodes.length > 0 ? uniqueNodes : ['通用基礎練習'];
 
     if (app.wizEngine === 'claude') {
-      // Claude Worker 模式：一次呼叫生成所有節點，無超時
       if (pMsg) pMsg.innerHTML = '🔮 Claude Worker 出題中（無超時限制）…';
       if (pBar) pBar.style.width = '30%';
       const result = await API.generateAllBatchClaude(effectiveNodes, grade, subject);
       if (pBar) pBar.style.width = '100%';
       if (pMsg) pMsg.innerHTML = `🎉 Claude Worker 完成！耗時 <b>${elapsedStr()}</b>`;
-      // 將 Worker 生成的題目存回 GAS（透過特定 action）
       if (result && result.questions && result.questions.length) {
         try {
           await API._call('saveBatchFromWorker', { taskName, questions: result.questions });
@@ -1039,7 +1000,6 @@ async function wizardCreateAndGenerate() {
         }
       }
     } else {
-      // GAS 批次模式（原本邏輯，完全不變）
       let gs = { isPaid: false };
       try { gs = await API.getGeminiSettings(); } catch(e) {}
       const delay = gs.isPaid ? 500 : 6000;
@@ -1062,11 +1022,14 @@ async function wizardCreateAndGenerate() {
     if (pMsg) pMsg.innerHTML = `🎉 完成！耗時 <b>${elapsed}</b>`;
     if (pEl) pEl.textContent = '';
 
+    // ✅ v13.9-fix：重新抓任務清單 → 同步所有 UI
     app.taskList = await API.getTasks();
     populateAdminTaskDropdowns();
-    // ✨ v13.5：自動刷新題庫管理
-    const bankAreaW = document.getElementById('bank-status');
-    if (bankAreaW) bankAreaW.innerHTML = '<div class="text-info small"><i class="fa-solid fa-rotate me-1"></i>有新任務，請點擊「題庫管理」標籤查看</div>';
+
+    // 強制刷新題庫管理卡片（不管 tab 開不開）
+    loadBankStatus();
+    // 同步更新學生登入頁任務選單（讓學生立刻可以選到新任務）
+    loadTasksForLogin();
 
     Swal.fire({ icon: 'success', title: '🎉 任務建立完成！', html: `「${esc(taskName)}」已完成出題。<br><span class="badge bg-secondary">耗時：${elapsed}</span>`, confirmButtonText: '好的' });
   } catch(e) {
@@ -1242,16 +1205,10 @@ function previewExcel() {
         });
       } else {
         // ✨ v13.9 修正：先偵測因材網格式，再判斷標準格式
-        // 因材網特徵：dataRows[0][0]='學生' 且 dataRows[0][1]='作答次數'
         const isAdaptLearn = String(dataRows[0]?.[0] || '').trim() === '學生' &&
                              String(dataRows[0]?.[1] || '').trim() === '作答次數';
         if (isAdaptLearn) {
-          // 因材網格式：自動解析弱點節點
-          // 結構：列1=節點名稱（每8欄一個，從index 6起）
-          // 每節點偏移：+0答對率 +1次數 +2完成率 +3次數 +4完成率 +5次數 +6狀態 +7答對率(節點)
-          // 弱點條件：狀態=未精熟 OR 答對率(節點)<60
           formatDetected = '因材網原始格式（自動解析弱點節點）';
-          // Step1：從列1找節點（每8欄一個，從欄6起）
           const nodeMap = [];
           const row1 = dataRows[0] || [];
           for (let ci = 6; ci < row1.length; ci += 8) {
@@ -1263,7 +1220,6 @@ function previewExcel() {
               if (nodeName.length >= 3) nodeMap.push({ name: nodeName, colStart: ci });
             }
           }
-          // Step2：從第4列起（跳過3列標題）解析學生
           dataRows.slice(3).forEach(r => {
             if (!r[0] || !String(r[0]).trim()) return;
             const raw = String(r[0]).trim();
@@ -1349,7 +1305,7 @@ function startProgress(msgEl, timerEl) {
 function stopProgress() { if (_rotatorInterval) { clearInterval(_rotatorInterval); _rotatorInterval = null; } }
 function elapsedStr() { const sec = Math.round((Date.now() - _waitStart) / 1000), m = Math.floor(sec / 60), s = sec % 60; return m > 0 ? `${m} 分 ${s} 秒` : `${s} 秒`; }
 
-/** Excel 上傳並出題（支援 GAS / Claude Worker 雙引擎）*/
+/** ✅ v13.9-fix：Excel 上傳並出題（完成後即時刷新題庫管理 + 學生登入選單）*/
 async function uploadAndGenerate() {
   const taskName = document.getElementById('task-name').value.trim();
   const grade = document.getElementById('task-grade').value;
@@ -1365,14 +1321,12 @@ async function uploadAndGenerate() {
   const pArea = document.getElementById('gen-progress-area'), pBar = document.getElementById('gen-progress-bar'), pMsg = document.getElementById('gen-progress-msg'), pEl = document.getElementById('gen-elapsed');
   pArea.style.display = ''; pBar.style.width = '0%'; pMsg.textContent = WAITING_MSGS[0]; startProgress(pMsg, pEl);
   try {
-    // 步驟1：GAS 儲存名冊（永遠走 GAS，無超時風險）
     await API.uploadTaskData(taskName, grade, subject, app.excelStudents, app.excelNodes);
     pBar.style.width = '8%'; pMsg.textContent = '✅ 學生名冊已儲存，開始 AI 出題…';
 
     const effectiveNodes = app.excelNodes.length > 0 ? app.excelNodes : ['通用基礎練習'];
 
     if (app.upEngine === 'claude') {
-      // Claude Worker 模式：一次生成所有節點
       pMsg.innerHTML = '🔮 Claude Worker 出題中（無超時限制）…';
       pBar.style.width = '30%';
       const result = await API.generateAllBatchClaude(effectiveNodes, grade, subject);
@@ -1386,7 +1340,6 @@ async function uploadAndGenerate() {
         }
       }
     } else {
-      // GAS 批次模式（原邏輯，完全不動）
       let gs = { isPaid: false }; try { gs = await API.getGeminiSettings(); } catch(e) {}
       const delay = gs.isPaid ? 500 : 6000;
       let batchIndex = 0, totalBatches = null;
@@ -1402,17 +1355,23 @@ async function uploadAndGenerate() {
       }
     }
 
-    stopProgress(); const elapsed = elapsedStr(); pBar.style.width = '100%'; pMsg.innerHTML = `🎉 完成！耗時 <b>${elapsed}</b>`; pEl.textContent = '';
+    stopProgress();
+    const elapsed = elapsedStr();
+    pBar.style.width = '100%';
+    pMsg.innerHTML = `🎉 完成！耗時 <b>${elapsed}</b>`;
+    pEl.textContent = '';
+
+    // ✅ v13.9-fix：重新抓任務清單 → 同步所有 UI
+    app.taskList = await API.getTasks();
+    populateAdminTaskDropdowns();
+
+    // 強制刷新題庫管理卡片（不管 tab 開不開，背景執行不卡 UI）
+    loadBankStatus();
+    // 同步更新學生登入頁任務選單（讓學生立刻可以選到新任務，無需重新整理頁面）
+    loadTasksForLogin();
+
     Swal.fire({ icon: 'success', title: '🎉 出題完成！', html: `「${esc(taskName)}」已完成出題。<br><span class="badge bg-secondary">耗時：${elapsed}</span>`, confirmButtonText: '好的' });
-    app.taskList = await API.getTasks(); populateAdminTaskDropdowns();
-    // ✨ v13.5：自動刷新題庫管理（讓剛上傳的任務卡片立即出現）
-    const bankArea = document.getElementById('bank-status');
-    if (bankArea && document.getElementById('tab-bank')?.classList.contains('show')) {
-      loadBankStatus();
-    } else if (bankArea) {
-      // 若 tab 沒開，標記需要重整（下次點擊時自動觸發，已有 onclick="loadBankStatus()"）
-      bankArea.innerHTML = '<div class="text-info small"><i class="fa-solid fa-rotate me-1"></i>有新任務，請點擊「題庫管理」標籤查看</div>';
-    }
+
   } catch(e) {
     stopProgress(); const elapsed = elapsedStr();
     pMsg.innerHTML = `<span class="text-danger">❌ 失敗（${elapsed}）：${esc(e.message)}</span>`; pEl.textContent = '';
@@ -1430,7 +1389,7 @@ async function clearNodeBank() {
 }
 
 // ==========================================
-// 📚 題庫管理（v13.5：顯示題目數 + 刪除任務）
+// 📚 題庫管理（顯示題目數 + 刪除任務）
 // ==========================================
 async function loadBankStatus() {
   const area = document.getElementById('bank-status');
@@ -1439,7 +1398,6 @@ async function loadBankStatus() {
     const tasks = await API.getTasks();
     if (!tasks.length) { area.innerHTML = '<p class="text-muted">目前沒有任務。</p>'; return; }
 
-    // 同步抓每個任務的題目數（並行請求，不阻塞）
     const questionCounts = {};
     await Promise.allSettled(tasks.map(async task => {
       try {
@@ -1452,7 +1410,6 @@ async function loadBankStatus() {
     tasks.forEach(task => {
       const valid = (task.weakNodes || []).filter(isValidNode);
       const qCount = questionCounts[task.taskName] ?? -1;
-      // 顏色判斷：有題目 → success；有節點但無題目 → warning；完全空 → secondary
       const color = qCount > 0 ? 'success' : (valid.length > 0 ? 'warning' : 'secondary');
       const safeKey = task.taskName.replace(/[^a-zA-Z0-9]/g, '_');
       const escapedName = task.taskName.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
@@ -1494,7 +1451,6 @@ async function loadBankStatus() {
   } catch(e) { area.innerHTML = `<p class="text-danger">載入失敗：${e.message}</p>`; }
 }
 
-/** 刪除任務（清除 Tasks + Students + Bank + Results）*/
 async function deleteTask(taskName) {
   const r = await Swal.fire({
     icon: 'warning',
@@ -1518,20 +1474,16 @@ async function deleteTask(taskName) {
   try {
     const msg = await API.deleteTask(taskName, pwd);
     Swal.close();
-    // 同步更新前端 taskList，讓所有下拉選單都立即消失
     app.taskList = app.taskList.filter(t => t.taskName !== taskName);
     populateAdminTaskDropdowns();
-    // 重新整理登入頁的任務選單（不重載頁面）
     const loginSel = document.getElementById('login-task');
     if (loginSel) {
       loginSel.innerHTML = '<option value="">-- 請選擇測驗任務 --</option>' +
         app.taskList.map(t => `<option value="${esc(t.taskName)}">${esc(t.taskName)}（${t.grade}/${t.subject}）</option>`).join('');
     }
-    // 移除該卡片
     const safeKey = taskName.replace(/[^a-zA-Z0-9]/g, '_');
     const card = document.getElementById('task-card-' + safeKey);
     if (card) card.remove();
-    // 若題庫管理已空，顯示提示
     const bankArea = document.getElementById('bank-status');
     if (bankArea && !bankArea.querySelector('[id^="task-card-"]')) {
       bankArea.innerHTML = '<p class="text-muted">目前沒有任務。</p>';
@@ -1704,7 +1656,6 @@ function toggleWsPreview() {
   }
 }
 
-/** 生成學習單（支援 GAS / Claude Worker 雙引擎）*/
 async function genWorksheet() {
   const ws = document.getElementById('worksheet-area');
   const topNodes = JSON.parse(ws.dataset.nodes || '[]'), grade = ws.dataset.grade, subject = ws.dataset.subject;
@@ -2023,7 +1974,6 @@ async function loadSettingsTab() {
     document.getElementById('prompt-chinese').value = prompts.chinesePrompt || '';
     document.getElementById('prompt-math-ws').value = prompts.mathWorksheetPrompt || '';
     document.getElementById('prompt-chinese-ws').value = prompts.chineseWorksheetPrompt || '';
-    // ✨ v13.4：更新 Claude Worker URL 顯示
     _initGasUrlDisplay();
   } catch(e) { console.warn('載入設定失敗:', e.message); }
 }
