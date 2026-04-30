@@ -744,8 +744,41 @@ const API = {
     }
   },
 
+  // ⚡ 強制跳過 Cloudflare Worker 快取，直走 JSONP 到 GAS（用於出題完成後的即時刷新）
+  _callDirect: (action, data = {}) => {
+    const payloadStr = JSON.stringify({ action, data });
+    return new Promise((resolve, reject) => {
+      const cbName = '_gas_direct_' + Date.now() + '_' + Math.floor(Math.random() * 99999);
+      let isDone = false;
+      const timer = setTimeout(() => {
+        if (isDone) return;
+        isDone = true; cleanup();
+        reject(new Error('直連逾時（20秒）'));
+      }, 20000);
+      const cleanup = () => { delete window[cbName]; const el = document.getElementById(cbName); if (el) el.remove(); };
+      window[cbName] = (res) => {
+        if (isDone) return;
+        isDone = true; clearTimeout(timer); cleanup();
+        if (res && res.status === 'success') resolve(res.data);
+        else reject(new Error(res ? res.message : '後端發生未知錯誤'));
+      };
+      const sep = app.gasUrl.includes('?') ? '&' : '?';
+      // 加上 _t 時間戳，確保每次請求都是全新的，不被任何快取攔截
+      const reqUrl = app.gasUrl + sep + 'payload=' + encodeURIComponent(payloadStr) + '&_t=' + Date.now();
+      const script = document.createElement('script');
+      script.id = cbName;
+      script.src = reqUrl + '&callback=' + cbName;
+      script.onerror = () => {
+        if (isDone) return;
+        cleanup(); isDone = true; clearTimeout(timer);
+        reject(new Error('直連 JSONP 失敗'));
+      };
+      document.body.appendChild(script);
+    });
+  },
   _submitWithRetry: async (action, data={}) => API._call(action, data),
   getTasks:()=>API._call('getTasks'),
+  getTasksDirect:()=>API._callDirect('getTasks'),
   getStudents:(n)=>API._call('getStudents',{taskName:n}),
   verifyAdmin:(p)=>API._call('verifyAdmin',{pwd:p}),
   getQuizSettings:()=>API._call('getQuizSettings'),
@@ -1047,8 +1080,9 @@ async function loadTasksForLogin() {
   sel.innerHTML = '<option value="">-- 連線中… --</option>';
   if (msg) msg.textContent = '';
   try {
+    // 使用 getTasksDirect 跳過 Cloudflare Worker 快取，確保學生登入選單即時更新
     const [tasks, helpUrl] = await Promise.all([
-      API.getTasks(),
+      API.getTasksDirect(),
       API.getHelpUrl().catch(() => '')
     ]);
     app.taskList = tasks;
@@ -1395,7 +1429,8 @@ async function loadBankStatus() {
   const area = document.getElementById('bank-status');
   area.innerHTML = '<div class="text-muted small"><i class="fa-solid fa-spinner fa-spin me-1"></i>載入中…</div>';
   try {
-    const tasks = await API.getTasks();
+    // 使用 getTasksDirect 跳過 Cloudflare Worker 快取，確保拿到最新任務清單
+    const tasks = await API.getTasksDirect();
     if (!tasks.length) { area.innerHTML = '<p class="text-muted">目前沒有任務。</p>'; return; }
 
     const questionCounts = {};
