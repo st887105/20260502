@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <!-- 版號 v13.9：整合版 - 因材網自動解析 + 題庫管理 + 刪除任務 + Claude Worker -->
-  <!-- fix: 出題完成後即時刷新題庫管理卡片 + 學生登入任務選單 -->
-  <title>車城國小｜學力檢測 AI 智慧補救系統 (v13.9)</title>
+  <!-- 版號 v13.9.1：修正題庫管理「直連 JSONP 失敗」問題 -->
+  <!-- fix: _callDirect 改為 Worker優先（繞快取）→ 降級JSONP；loadBankStatus/loadTasksForLogin/onTaskChange 改用穩定Worker路徑 -->
+  <title>車城國小｜學力檢測 AI 智慧補救系統 (v13.9.1)</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -494,7 +494,7 @@
 
 <footer class="mt-4">
   <div class="container px-3">
-    車城國小資訊老師 @ Google Gemini 協作設計 ｜ v13.9 ｜
+    車城國小資訊老師 @ Google Gemini 協作設計 ｜ v13.9.1 ｜
     <a href="https://github.com/st887105/20260404" target="_blank"><i class="fa-brands fa-github me-1"></i>原始碼</a>
   </div>
 </footer>
@@ -744,9 +744,31 @@ const API = {
     }
   },
 
-  // ⚡ 強制跳過 Cloudflare Worker 快取，直走 JSONP 到 GAS（用於出題完成後的即時刷新）
-  _callDirect: (action, data = {}) => {
+  // ==========================================
+  // ⚡ v13.9.1 修正：_callDirect 改為
+  //   先走 Worker（加 cache:no-store + _t 繞快取）
+  //   → Worker 失敗才降級 JSONP
+  //   這樣解決「直連 JSONP 失敗」問題，同時
+  //   確保拿到最新資料（繞過 Cloudflare 快取）
+  // ==========================================
+  _callDirect: async (action, data = {}) => {
     const payloadStr = JSON.stringify({ action, data });
+
+    // 1. 優先：Worker + 時間戳繞快取（no-store 告訴 fetch 不用自身快取）
+    try {
+      const workerResp = await fetch(
+        WORKER_URL + '?payload=' + encodeURIComponent(payloadStr) + '&_t=' + Date.now(),
+        { method: 'GET', redirect: 'follow', cache: 'no-store' }
+      );
+      if (!workerResp.ok) throw new Error('Worker HTTP ' + workerResp.status);
+      const json = await workerResp.json();
+      if (json.status === 'success') return json.data;
+      throw new Error(json.message || '後端回報錯誤');
+    } catch(workerErr) {
+      console.warn('[callDirect] Worker 失敗，降級 JSONP：', workerErr.message);
+    }
+
+    // 2. 降級：JSONP 直連 GAS（加 _t 避免瀏覽器 script 快取）
     return new Promise((resolve, reject) => {
       const cbName = '_gas_direct_' + Date.now() + '_' + Math.floor(Math.random() * 99999);
       let isDone = false;
@@ -763,7 +785,6 @@ const API = {
         else reject(new Error(res ? res.message : '後端發生未知錯誤'));
       };
       const sep = app.gasUrl.includes('?') ? '&' : '?';
-      // 加上 _t 時間戳，確保每次請求都是全新的，不被任何快取攔截
       const reqUrl = app.gasUrl + sep + 'payload=' + encodeURIComponent(payloadStr) + '&_t=' + Date.now();
       const script = document.createElement('script');
       script.id = cbName;
@@ -776,11 +797,10 @@ const API = {
       document.body.appendChild(script);
     });
   },
+
   _submitWithRetry: async (action, data={}) => API._call(action, data),
   getTasks:()=>API._call('getTasks'),
-  getTasksDirect:()=>API._callDirect('getTasks'),
   getStudents:(n)=>API._call('getStudents',{taskName:n}),
-  getStudentsDirect:(n)=>API._callDirect('getStudents',{taskName:n}),
   verifyAdmin:(p)=>API._call('verifyAdmin',{pwd:p}),
   getQuizSettings:()=>API._call('getQuizSettings'),
   updateQuizSettings:(c)=>API._call('updateQuizSettings',{count:c}),
@@ -817,7 +837,6 @@ const API = {
   getQuestionErrorRates:(n)=>API._call('getQuestionErrorRates',{taskName:n}),
   getPracticeQuestionsForErrors:(n)=>API._call('getPracticeQuestionsForErrors',{taskName:n}),
   getTaskQuestions:(n)=>API._call('getTaskQuestions',{taskName:n}),
-  getTaskQuestionsDirect:(n)=>API._callDirect('getTaskQuestions',{taskName:n}),
   getHelpUrl:()=>API._call('getHelpUrl'),
   updateHelpUrl:(url,pwd)=>API._call('updateHelpUrl',{url,pwd}),
   saveWorksheetToCloud:(n,g,s,h)=>API._call('saveWorksheetToCloud',{taskName:n,grade:g,subject:s,htmlContent:h}),
@@ -986,7 +1005,7 @@ async function wizardInitDB() {
   }
 }
 
-/** ✅ v13.9-fix：精靈建立任務並出題（完成後即時刷新題庫管理 + 學生登入選單）*/
+/** v13.9.1：精靈建立任務並出題（完成後即時刷新題庫管理 + 學生登入選單）*/
 async function wizardCreateAndGenerate() {
   const taskName = document.getElementById('wiz-task-name')?.value.trim() || '';
   const grade = document.getElementById('wiz-grade')?.value || '';
@@ -1057,13 +1076,10 @@ async function wizardCreateAndGenerate() {
     if (pMsg) pMsg.innerHTML = `🎉 完成！耗時 <b>${elapsed}</b>`;
     if (pEl) pEl.textContent = '';
 
-    // ✅ v13.9-fix：重新抓任務清單 → 同步所有 UI
+    // 重新抓任務清單 → 同步所有 UI
     app.taskList = await API.getTasks();
     populateAdminTaskDropdowns();
-
-    // 強制刷新題庫管理卡片（不管 tab 開不開）
     loadBankStatus();
-    // 同步更新學生登入頁任務選單（讓學生立刻可以選到新任務）
     loadTasksForLogin();
 
     Swal.fire({ icon: 'success', title: '🎉 任務建立完成！', html: `「${esc(taskName)}」已完成出題。<br><span class="badge bg-secondary">耗時：${elapsed}</span>`, confirmButtonText: '好的' });
@@ -1077,14 +1093,19 @@ async function wizardCreateAndGenerate() {
 // ==========================================
 // 🧑‍🎓 登入與學生功能
 // ==========================================
+
+/**
+ * v13.9.1 修正：loadTasksForLogin 改用穩定的 API.getTasks()（Worker路徑）
+ * 原本用 getTasksDirect()（JSONP）在某些環境會失敗導致頁面顯示「直連 JSONP 失敗」
+ * Worker 路徑已足夠可靠，不需要強制 JSONP
+ */
 async function loadTasksForLogin() {
   const sel = document.getElementById('login-task'), msg = document.getElementById('login-status-msg');
   sel.innerHTML = '<option value="">-- 連線中… --</option>';
   if (msg) msg.textContent = '';
   try {
-    // 使用 getTasksDirect 跳過 Cloudflare Worker 快取，確保學生登入選單即時更新
     const [tasks, helpUrl] = await Promise.all([
-      API.getTasksDirect(),
+      API.getTasks(),
       API.getHelpUrl().catch(() => '')
     ]);
     app.taskList = tasks;
@@ -1130,14 +1151,16 @@ function formatStudentLabel(s) {
   return anon ? `${numStr} ${anon}` : numStr;
 }
 
+/**
+ * v13.9.1 修正：onTaskChange 改用穩定的 API.getStudents()（Worker路徑）
+ */
 async function onTaskChange() {
   const taskName = document.getElementById('login-task').value;
   const numSel = document.getElementById('login-number');
   numSel.innerHTML = '<option value="">-- 載入中… --</option>';
   if (!taskName) { numSel.innerHTML = '<option value="">-- 請先選任務 --</option>'; return; }
   try {
-    // 使用 Direct 跳過 Worker 快取，確保學生選單即時更新
-    app.studentList = await API.getStudentsDirect(taskName);
+    app.studentList = await API.getStudents(taskName);
     if (!app.studentList.length) { numSel.innerHTML = '<option value="">-- 此任務無學生資料 --</option>'; return; }
     numSel.innerHTML = '<option value="">-- 請選擇姓名 --</option>' +
       app.studentList.map(s => `<option value="${esc(s.number)}">${esc(formatStudentLabel(s))}</option>`).join('');
@@ -1241,7 +1264,7 @@ function previewExcel() {
           wn.forEach(n => allNodes.add(n));
         });
       } else {
-        // ✨ v13.9 修正：先偵測因材網格式，再判斷標準格式
+        // v13.9 修正：先偵測因材網格式，再判斷標準格式
         const isAdaptLearn = String(dataRows[0]?.[0] || '').trim() === '學生' &&
                              String(dataRows[0]?.[1] || '').trim() === '作答次數';
         if (isAdaptLearn) {
@@ -1342,7 +1365,7 @@ function startProgress(msgEl, timerEl) {
 function stopProgress() { if (_rotatorInterval) { clearInterval(_rotatorInterval); _rotatorInterval = null; } }
 function elapsedStr() { const sec = Math.round((Date.now() - _waitStart) / 1000), m = Math.floor(sec / 60), s = sec % 60; return m > 0 ? `${m} 分 ${s} 秒` : `${s} 秒`; }
 
-/** ✅ v13.9-fix：Excel 上傳並出題（完成後即時刷新題庫管理 + 學生登入選單）*/
+/** v13.9.1：Excel 上傳並出題（完成後即時刷新題庫管理 + 學生登入選單）*/
 async function uploadAndGenerate() {
   const taskName = document.getElementById('task-name').value.trim();
   const grade = document.getElementById('task-grade').value;
@@ -1398,13 +1421,10 @@ async function uploadAndGenerate() {
     pMsg.innerHTML = `🎉 完成！耗時 <b>${elapsed}</b>`;
     pEl.textContent = '';
 
-    // ✅ v13.9-fix：重新抓任務清單 → 同步所有 UI
+    // 重新抓任務清單 → 同步所有 UI
     app.taskList = await API.getTasks();
     populateAdminTaskDropdowns();
-
-    // 強制刷新題庫管理卡片（不管 tab 開不開，背景執行不卡 UI）
     loadBankStatus();
-    // 同步更新學生登入頁任務選單（讓學生立刻可以選到新任務，無需重新整理頁面）
     loadTasksForLogin();
 
     Swal.fire({ icon: 'success', title: '🎉 出題完成！', html: `「${esc(taskName)}」已完成出題。<br><span class="badge bg-secondary">耗時：${elapsed}</span>`, confirmButtonText: '好的' });
@@ -1426,21 +1446,22 @@ async function clearNodeBank() {
 }
 
 // ==========================================
-// 📚 題庫管理（顯示題目數 + 刪除任務）
+// 📚 題庫管理（v13.9.1 修正：改用 Worker 穩定路徑）
 // ==========================================
 async function loadBankStatus() {
   const area = document.getElementById('bank-status');
   area.innerHTML = '<div class="text-muted small"><i class="fa-solid fa-spinner fa-spin me-1"></i>載入中…</div>';
   try {
-    // 使用 getTasksDirect 跳過 Cloudflare Worker 快取，確保拿到最新任務清單
-    const tasks = await API.getTasksDirect();
+    // v13.9.1 修正：改用 API.getTasks()（Worker路徑），不用 getTasksDirect()（JSONP）
+    // 避免在某些環境（GitHub Pages CSP 等）JSONP 被封鎖導致「直連 JSONP 失敗」
+    const tasks = await API.getTasks();
     if (!tasks.length) { area.innerHTML = '<p class="text-muted">目前沒有任務。</p>'; return; }
 
     const questionCounts = {};
     await Promise.allSettled(tasks.map(async task => {
       try {
-        // 使用 Direct 跳過 Worker 快取，確保看到最新題目數
-        const res = await API.getTaskQuestionsDirect(task.taskName);
+        // v13.9.1 修正：改用 API.getTaskQuestions()（Worker路徑）
+        const res = await API.getTaskQuestions(task.taskName);
         questionCounts[task.taskName] = (res.questions || []).length;
       } catch(e) { questionCounts[task.taskName] = -1; }
     }));
@@ -1537,8 +1558,8 @@ async function deleteTask(taskName) {
 async function previewStudentList(taskName) {
   Swal.fire({ title: '載入學生名單…', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
   try {
-    // 使用 Direct 跳過 Worker 快取，確保顯示最新學生名單
-    const students = await API.getStudentsDirect(taskName); Swal.close();
+    // v13.9.1：改用穩定的 API.getStudents()
+    const students = await API.getStudents(taskName); Swal.close();
     if (!students || !students.length) { return Swal.fire({ icon: 'info', title: '此任務無學生資料' }); }
     const tbody = students.map((s, i) => `<tr><td class="text-muted small">${i + 1}</td><td>${esc(s.number)}</td><td class="fw-bold text-primary">${esc(formatStudentLabel(s))}</td><td class="small">${(s.weakNodes || []).slice(0, 3).map(n => `<span class="weak-node-badge">${esc(n)}</span>`).join('')}</td></tr>`).join('');
     Swal.fire({ title: `「${taskName}」學生名單`, html: `<div class="text-start"><div class="alert alert-info py-1 px-2 small mb-2">共 <b>${students.length}</b> 位學生｜姓名已去識別化顯示</div><div style="max-height:420px;overflow-y:auto;"><table class="table table-sm table-bordered table-hover mb-0"><thead class="table-primary sticky-top"><tr><th>#</th><th>座號</th><th>匿名姓名</th><th>弱點節點</th></tr></thead><tbody>${tbody}</tbody></table></div></div>`, confirmButtonText: '關閉', width: '660px' });
@@ -1548,8 +1569,8 @@ async function previewStudentList(taskName) {
 async function previewBankQuestions(taskName) {
   Swal.fire({ title: '載入題目預覽…', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
   try {
-    // 使用 Direct 跳過 Worker 快取，確保顯示最新題目
-    const res = await API.getTaskQuestionsDirect(taskName); Swal.close();
+    // v13.9.1：改用穩定的 API.getTaskQuestions()
+    const res = await API.getTaskQuestions(taskName); Swal.close();
     const qs = res.questions || [];
     if (!qs.length) { return Swal.fire({ icon: 'info', title: '題庫尚無題目', text: '請先點「重新出題」建立題庫。' }); }
     const byLevel = { A: 0, B: 0, C: 0, D: 0 };
