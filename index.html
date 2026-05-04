@@ -570,7 +570,7 @@
 // ==========================================
 // ⚙️ 全域設定 - GAS URL
 // ==========================================
-const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbzZkbaTv--bPVJeOwOjHqdKhqemQ6WgKSVifh-Z0J6ap-QngMeTpB2SWaCtlOvjS31N/exec';
+const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwQcuNrrxdxVXFjRnLGBaoOcoF7MZWEyL7mz3v0UnjEMFUUF0tNK1txIImvp6IW_jKw/exec';
 const WORKER_URL = 'https://gas-proxy.sunny-f0b.workers.dev';
 const DEFAULT_CLAUDE_WORKER_URL = 'https://20260501claude-worksheet.sunny-f0b.workers.dev';
 
@@ -1989,14 +1989,73 @@ function _renderSimResult(area, data, taskName) {
   app_sim.previewOpen = false;
 }
 
-async function genSimilarOnDemand(taskName, nodes, btn) {
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>生成中…'; }
+// 透過 Claude Worker 即時生成類似題
+async function _genSimilarViaClaude(taskName, nodes) {
+  const workerUrl = getClaudeWorkerUrl();
+  // 取得任務的 grade/subject
+  let grade = '三年級', subject = '數學';
+  try {
+    const tasks = await API._callJsonpOnly('getTasks', {});
+    const t = (tasks || []).find(t => t.taskName === taskName);
+    if (t) { grade = t.grade || grade; subject = t.subject || subject; }
+  } catch(e) {}
+
+  const nodeList = nodes.slice(0, 3).map((n, i) => (i + 1) + '. [' + n + ']').join('\n');
+  const prompt = '你是一位台灣小學' + subject + '老師，請針對以下弱點節點，為' + grade + '學生出 2 題選擇題（每題 4 選項）作為補救練習。\n節點：\n' + nodeList + '\n\n請用 JSON 陣列回傳，格式：[{"node":"節點名","text":"題目","options":["A...","B...","C...","D..."],"answer":"A","hint":"提示","level":"C"}]，只回傳 JSON 不要其他文字。';
+
+  const resp = await fetch(workerUrl + '/worksheet', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, taskName, grade, subject, mode: 'similar' })
+  });
+  if (!resp.ok) throw new Error('Claude Worker HTTP ' + resp.status);
+  const json = await resp.json();
+  // 解析回應
+  let questions = [];
+  const raw = json.html || json.content || json.result || '';
+  try {
+    const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/, '').trim();
+    const arr = JSON.parse(clean);
+    if (Array.isArray(arr)) questions = arr;
+  } catch(e) { throw new Error('Claude 回應格式錯誤：' + raw.slice(0, 100)); }
+  return questions;
+}
+
+async function genSimilarOnDemand(taskName, nodes, btn, mode) {
+  if (!mode) {
+    // 顯示選擇：Gemini 或 Claude
+    const result = await Swal.fire({
+      title: '選擇 AI 生成引擎',
+      html: '<div class="d-flex flex-column gap-2 mt-2">' +
+        '<button id="swal-gemini" class="btn btn-primary w-100"><i class="fa-solid fa-gem me-2"></i>Gemini（透過 GAS）<br><small class="text-white-50">需要 GAS 已部署最新版</small></button>' +
+        '<button id="swal-claude" class="btn btn-warning w-100"><i class="fa-solid fa-wand-magic-sparkles me-2"></i>Claude Sonnet 4.6（透過 Worker）<br><small>不受 GAS 限制，品質更好</small></button>' +
+        '</div>',
+      showConfirmButton: false,
+      showCancelButton: true,
+      cancelButtonText: '取消',
+      didOpen: () => {
+        document.getElementById('swal-gemini').onclick = () => Swal.clickConfirm() || (Swal._selectedMode = 'gemini', Swal.close());
+        document.getElementById('swal-claude').onclick = () => (Swal._selectedMode = 'claude', Swal.close());
+      }
+    });
+    if (result.isDismissed && !Swal._selectedMode) return;
+    const selectedMode = Swal._selectedMode || 'gemini';
+    Swal._selectedMode = null;
+    return genSimilarOnDemand(taskName, nodes, btn, selectedMode);
+  }
+
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>' + (mode === 'claude' ? 'Claude 生成中…' : 'Gemini 生成中…'); }
   const area = document.getElementById('similar-practice-area');
   try {
-    const questions = await API.generateSimilarOnDemand(taskName, nodes);
+    let questions = [];
+    if (mode === 'claude') {
+      questions = await _genSimilarViaClaude(taskName, nodes);
+    } else {
+      questions = await API.generateSimilarOnDemand(taskName, nodes);
+    }
     if (!questions || !questions.length) {
       if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles me-1"></i>立即 AI 生成類似題'; }
-      return Swal.fire({ icon: 'warning', title: '生成失敗', text: 'Gemini 未能生成題目，請稍後再試。' });
+      return Swal.fire({ icon: 'warning', title: '生成失敗', text: 'AI 未能生成題目，請稍後再試。' });
     }
     // 組合成 _renderSimResult 格式
     const nodeMap = {};
@@ -2007,7 +2066,7 @@ async function genSimilarOnDemand(taskName, nodes, btn) {
     const data = Object.values(nodeMap);
     app_sim.data = data; app_sim.taskName = taskName;
     _renderSimResult(area, data, taskName);
-    Swal.fire({ icon: 'success', title: '類似題已生成！', timer: 1500, showConfirmButton: false });
+    Swal.fire({ icon: 'success', title: (mode === 'claude' ? 'Claude' : 'Gemini') + ' 類似題已生成！', timer: 1500, showConfirmButton: false });
   } catch(e) {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles me-1"></i>立即 AI 生成類似題'; }
     Swal.fire({ icon: 'error', title: '生成失敗', text: e.message });
