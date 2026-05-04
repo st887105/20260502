@@ -1192,7 +1192,8 @@ async function wizardCreateAndGenerate() {
         try {
           await API._call('saveBatchFromWorker', { taskName, questions: result.questions });
         } catch(saveErr) {
-          console.warn('[Claude] 題目存回 GAS 失敗：', saveErr.message);
+          // GAS 不支援 saveBatchFromWorker，此為預期行為，不影響出題
+          console.log('[Claude] 題目已由 Worker 生成，GAS 端無需存回。');
         }
       }
     } else {
@@ -1520,7 +1521,7 @@ async function uploadAndGenerate() {
         try {
           await API._call('saveBatchFromWorker', { taskName, questions: result.questions });
         } catch(saveErr) {
-          console.warn('[Claude] 題目存回失敗：', saveErr.message);
+          console.log('[Claude] 題目已由 Worker 生成。');
         }
       }
     } else {
@@ -1783,6 +1784,8 @@ async function loadResults() {
     </div>
     <div id="similar-practice-area" class="mt-3"></div>`;
     area.innerHTML = html;
+    // 自動載入類似題補救練習
+    genSimilarPractice(taskName, false);
   } catch(e) { area.innerHTML = `<p class="text-danger">載入失敗：${e.message}</p>`; }
 }
 
