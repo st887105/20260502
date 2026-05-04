@@ -943,6 +943,7 @@ const API = {
   updateGeminiSettings:(m,p,pwd)=>API._call('updateGeminiSettings',{model:m,isPaid:p,pwd}),
   getQuestionErrorRates:(n)=>API._call('getQuestionErrorRates',{taskName:n}),
   getPracticeQuestionsForErrors:(n)=>API._call('getPracticeQuestionsForErrors',{taskName:n}),
+  generateSimilarOnDemand:(taskName,nodes)=>API._call('generateSimilarOnDemand',{taskName,nodes}),
   getTaskQuestions:(n)=>API._call('getTaskQuestions',{taskName:n}),
   getHelpUrl:()=>API._call('getHelpUrl'),
   updateHelpUrl:(url,pwd)=>API._call('updateHelpUrl',{url,pwd}),
@@ -1936,7 +1937,23 @@ async function genSimilarPractice(taskName, forceRegen) {
           }
         }
       } catch(e) { reason = '⚠️ 診斷失敗：' + e.message; }
-      area.innerHTML = `<div class="alert alert-info small py-2"><i class="fa-solid fa-circle-info me-1"></i>${reason}</div>`;
+      // 取得任務的弱點節點
+      let errorNodes = [];
+      try {
+        const rr = await API._callJsonpOnly('getTaskResults', { taskName });
+        const nodeMap = {};
+        (rr || []).forEach(r => (r.details||[]).forEach(d => {
+          if (!d.correct && d.node) nodeMap[d.node] = (nodeMap[d.node]||0)+1;
+        }));
+        errorNodes = Object.keys(nodeMap).sort((a,b)=>nodeMap[b]-nodeMap[a]).slice(0,3);
+      } catch(e) {}
+      
+      const genBtn = errorNodes.length
+        ? `<button class="btn btn-warning btn-sm mt-2" onclick="genSimilarOnDemand('${taskName.replace(/'/g,"\'")}', ${JSON.stringify(errorNodes)}, this)">
+            <i class="fa-solid fa-wand-magic-sparkles me-1"></i>立即 AI 生成類似題
+           </button>`
+        : '';
+      area.innerHTML = `<div class="alert alert-info small py-2"><i class="fa-solid fa-circle-info me-1"></i>${reason}${genBtn ? '<br>' + genBtn : ''}</div>`;
       return;
     }
     app_sim.data = data; app_sim.taskName = taskName; app_sim.previewOpen = false;
@@ -1963,6 +1980,31 @@ function _renderSimResult(area, data, taskName) {
     <div class="d-flex gap-2 flex-wrap align-items-center mb-2 mt-3"><h6 class="fw-bold mb-0"><i class="fa-solid fa-dumbbell text-warning me-1"></i>錯誤類似題（共 ${data.length} 個節點）</h6><button class="btn btn-outline-secondary btn-sm" id="sim-toggle-btn" onclick="toggleSimPreview()"><i class="fa-solid fa-eye me-1"></i>展開預覽</button><button class="btn btn-outline-warning btn-sm" onclick="genSimilarPractice('${escapedTask}', true)"><i class="fa-solid fa-rotate me-1"></i>重新生成</button></div>
     <div id="sim-preview-area" style="display:none;"><div class="border rounded p-3 bg-white">${previewHtml}</div></div>`;
   app_sim.previewOpen = false;
+}
+
+async function genSimilarOnDemand(taskName, nodes, btn) {
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>生成中…'; }
+  const area = document.getElementById('similar-practice-area');
+  try {
+    const questions = await API.generateSimilarOnDemand(taskName, nodes);
+    if (!questions || !questions.length) {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles me-1"></i>立即 AI 生成類似題'; }
+      return Swal.fire({ icon: 'warning', title: '生成失敗', text: 'Gemini 未能生成題目，請稍後再試。' });
+    }
+    // 組合成 _renderSimResult 格式
+    const nodeMap = {};
+    questions.forEach(q => {
+      if (!nodeMap[q.node]) nodeMap[q.node] = { node: q.node, errorCount: 1, questions: [] };
+      nodeMap[q.node].questions.push(q);
+    });
+    const data = Object.values(nodeMap);
+    app_sim.data = data; app_sim.taskName = taskName;
+    _renderSimResult(area, data, taskName);
+    Swal.fire({ icon: 'success', title: '類似題已生成！', timer: 1500, showConfirmButton: false });
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles me-1"></i>立即 AI 生成類似題'; }
+    Swal.fire({ icon: 'error', title: '生成失敗', text: e.message });
+  }
 }
 
 function toggleSimPreview() {
