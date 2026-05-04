@@ -417,14 +417,22 @@
                     <div class="mb-3">
                       <label class="form-label text-muted small fw-bold">AI 模型選擇</label>
                       <div class="input-group input-group-sm">
-                        <select id="setting-gemini-model" class="form-select font-monospace">
-                          <option value="gemma-4-31b-it">✅ gemma-4-31b-it（目前可用｜1500次/天）</option>
-                          <option value="gemini-2.5-flash">gemini-2.5-flash（備用）</option>
-                          <option value="gemini-2.0-flash">gemini-2.0-flash（備用）</option>
+                        <select id="setting-gemini-model" class="form-select font-monospace" onchange="onModelSelectChange()">
+                          <option value="gemini-2.5-flash">⭐ gemini-2.5-flash（最新推薦）</option>
+                          <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite（輕量省配額）</option>
+                          <option value="gemini-2.0-flash">gemini-2.0-flash（穩定）</option>
+                          <option value="gemma-4-31b-it">gemma-4-31b-it（免費｜1500次/天）</option>
+                          <option value="gemini-1.5-flash">gemini-1.5-flash（舊版備用）</option>
+                          <option value="__custom__">✏️ 自訂模型名稱…</option>
                         </select>
                         <button class="btn btn-outline-primary" onclick="saveGeminiSettings()">儲存</button>
                       </div>
                       <div class="form-check mt-1"><input class="form-check-input" type="checkbox" id="setting-is-paid"><label class="form-check-label small" for="setting-is-paid">付費帳號（解除速率限制）</label></div>
+                      <div id="custom-model-row" class="input-group input-group-sm mt-2" style="display:none;">
+                        <span class="input-group-text"><i class="fa-solid fa-pencil"></i></span>
+                        <input type="text" id="setting-custom-model" class="form-control font-monospace" placeholder="例：gemini-2.5-pro">
+                        <span class="input-group-text text-muted small">手動輸入模型名稱</span>
+                      </div>
                     </div>
                     <hr>
                     <div class="mb-3 p-2 border border-purple rounded" style="border-color:#7c3aed!important;background:#faf5ff;">
@@ -570,7 +578,7 @@
 // ==========================================
 // ⚙️ 全域設定 - GAS URL
 // ==========================================
-const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwQcuNrrxdxVXFjRnLGBaoOcoF7MZWEyL7mz3v0UnjEMFUUF0tNK1txIImvp6IW_jKw/exec';
+const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbzZkbaTv--bPVJeOwOjHqdKhqemQ6WgKSVifh-Z0J6ap-QngMeTpB2SWaCtlOvjS31N/exec';
 const WORKER_URL = 'https://gas-proxy.sunny-f0b.workers.dev';
 const DEFAULT_CLAUDE_WORKER_URL = 'https://20260501claude-worksheet.sunny-f0b.workers.dev';
 
@@ -2480,7 +2488,17 @@ async function loadSettingsTab() {
     if (![...modelSel.options].some(o => o.value === savedModel)) {
       const opt = document.createElement('option'); opt.value = savedModel; opt.textContent = savedModel + '（自訂）'; modelSel.appendChild(opt);
     }
-    modelSel.value = savedModel;
+    // 若已儲存的模型不在選單中，加入自訂選項並顯示輸入框
+    const knownModels = [...modelSel.options].map(o => o.value).filter(v => v !== '__custom__');
+    if (knownModels.includes(savedModel)) {
+      modelSel.value = savedModel;
+    } else {
+      modelSel.value = '__custom__';
+      const customRow = document.getElementById('custom-model-row');
+      const customInput = document.getElementById('setting-custom-model');
+      if (customRow) customRow.style.display = '';
+      if (customInput) customInput.value = savedModel;
+    }
     document.getElementById('setting-is-paid').checked = gemini.isPaid;
     document.getElementById('prompt-math').value = prompts.mathPrompt || '';
     document.getElementById('prompt-chinese').value = prompts.chinesePrompt || '';
@@ -2501,9 +2519,21 @@ async function saveHelpUrl() {
   const url = document.getElementById('setting-help-url').value.trim();
   try { const msg = await API.updateHelpUrl(url, app.adminPwd); Swal.fire({ icon: 'success', title: msg, timer: 1500, showConfirmButton: false }); } catch(e) { Swal.fire({ icon: 'error', title: '儲存失敗', text: e.message }); }
 }
+function onModelSelectChange() {
+  const sel = document.getElementById('setting-gemini-model');
+  const customRow = document.getElementById('custom-model-row');
+  if (sel && customRow) customRow.style.display = sel.value === '__custom__' ? '' : 'none';
+}
+
 async function saveGeminiSettings() {
   try {
-    const model = document.getElementById('setting-gemini-model').value.trim(), isPaid = document.getElementById('setting-is-paid').checked;
+    const selEl = document.getElementById('setting-gemini-model');
+    let model = selEl.value.trim();
+    if (model === '__custom__') {
+      model = (document.getElementById('setting-custom-model').value || '').trim();
+      if (!model) return Swal.fire({ icon: 'warning', title: '請輸入自訂模型名稱' });
+    }
+    const isPaid = document.getElementById('setting-is-paid').checked;
     const msg = await API.updateGeminiSettings(model, isPaid, app.adminPwd);
     Swal.fire({ icon: 'success', title: msg, timer: 1500, showConfirmButton: false });
     await loadSettingsTab();
