@@ -731,7 +731,7 @@ const API = {
           { method: 'GET', redirect: 'follow' }
         );
         if (!workerResp.ok) throw new Error('Worker HTTP ' + workerResp.status);
-        const json = await workerResp.json();
+        let json; try { json = await workerResp.json(); } catch(pe) { throw new Error('Worker 回應無法解析：' + pe.message); }
         if (json.status === 'success') return json.data;
         throw new Error(json.message || '後端回報錯誤');
       } catch(workerErr) {
@@ -1948,19 +1948,26 @@ async function genSimilarPractice(taskName, forceRegen) {
         errorNodes = Object.keys(nodeMap).sort((a,b)=>nodeMap[b]-nodeMap[a]).slice(0,3);
       } catch(e) {}
       
-      const genBtn = errorNodes.length
-        ? `<button class="btn btn-warning btn-sm mt-2" onclick="genSimilarOnDemand('${taskName.replace(/'/g,"\'")}', ${JSON.stringify(errorNodes)}, this)">
-            <i class="fa-solid fa-wand-magic-sparkles me-1"></i>立即 AI 生成類似題
-           </button>`
-        : '';
-      area.innerHTML = `<div class="alert alert-info small py-2"><i class="fa-solid fa-circle-info me-1"></i>${reason}${genBtn ? '<br>' + genBtn : ''}</div>`;
+      const safeId = 'genBtn_' + Date.now();
+      const genBtn = errorNodes.length ? safeId : '';
+      area.innerHTML = `<div class="alert alert-info small py-2"><i class="fa-solid fa-circle-info me-1"></i>${reason}${genBtn ? '<br><button id="' + genBtn + '" class="btn btn-warning btn-sm mt-2"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>立即 AI 生成類似題</button>' : ''}</div>`;
+      if (genBtn) {
+        document.getElementById(genBtn).addEventListener('click', function() {
+          genSimilarOnDemand(taskName, errorNodes, this);
+        });
+      }
       return;
     }
     app_sim.data = data; app_sim.taskName = taskName; app_sim.previewOpen = false;
     _renderSimResult(area, data, taskName);
   } catch(e) {
     clearInterval(tick); clearInterval(timerTick); stopProgress();
-    area.innerHTML = `<div class="alert alert-danger small py-2">生成失敗：${e.message}</div>`;
+    let errMsg = e.message || String(e);
+    // JSON parse 失敗 → 通常是 GAS 未部署新版
+    if (errMsg.includes('end of input') || errMsg.includes('JSON') || errMsg.includes('parse')) {
+      errMsg = 'GAS 回應格式錯誤，請確認已部署最新版 GAS（重新部署並選「執行為我」、「任何人」）';
+    }
+    area.innerHTML = `<div class="alert alert-danger small py-2"><i class="fa-solid fa-triangle-exclamation me-1"></i>${errMsg}</div>`;
   }
 }
 
