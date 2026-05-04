@@ -1920,7 +1920,25 @@ async function genSimilarPractice(taskName, forceRegen) {
   try {
     const data = await API.getPracticeQuestionsForErrors(taskName);
     clearInterval(tick); clearInterval(timerTick); stopProgress();
-    if (!data || !data.length) { area.innerHTML = '<div class="alert alert-info small py-2">此任務尚無足夠錯題資料。</div>'; return; }
+    if (!data || !data.length) {
+      // 診斷：檢查原因
+      let reason = '尚無足夠錯題資料';
+      try {
+        const results = await API._callJsonpOnly('getTaskResults', { taskName });
+        if (!results || !results.length) {
+          reason = '⚠️ 尚無學生作答紀錄，完成測驗後才能生成類似題。';
+        } else {
+          const allCorrect = results.every(r => (r.details||[]).every(d => d.correct));
+          if (allCorrect) {
+            reason = '✅ 所有學生全部答對！無需補救練習。';
+          } else {
+            reason = '⚠️ Bank 題庫尚無此節點的類似題。請先完成出題，再重新整理頁面。';
+          }
+        }
+      } catch(e) { reason = '⚠️ 診斷失敗：' + e.message; }
+      area.innerHTML = `<div class="alert alert-info small py-2"><i class="fa-solid fa-circle-info me-1"></i>${reason}</div>`;
+      return;
+    }
     app_sim.data = data; app_sim.taskName = taskName; app_sim.previewOpen = false;
     _renderSimResult(area, data, taskName);
   } catch(e) {
