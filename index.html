@@ -559,7 +559,7 @@
 
 <footer class="mt-4">
   <div class="container px-3">
-    車城國小資訊老師 @ Google Gemini 協作設計 ｜ v13.9.6 ｜
+    車城國小資訊老師 @ Google Gemini 協作設計 ｜ v13.9.7 ｜
     <a href="https://github.com/st887105/20260404" target="_blank"><i class="fa-brands fa-github me-1"></i>原始碼</a>
   </div>
 </footer>
@@ -997,6 +997,15 @@ function isValidNode(val){const s=String(val||'').trim();if(!s||['-','未診斷'
 // 🚀 初始化
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
+  // v13.9.6 fix: 強制清除舊 localStorage GAS URL，確保使用最新 DEFAULT_GAS_URL
+  try {
+    const storedDefault = localStorage.getItem('gasUrlDefault');
+    if (!storedDefault || storedDefault !== DEFAULT_GAS_URL) {
+      localStorage.removeItem('gasUrl');
+      localStorage.removeItem('gasUrlDefault');
+      app.gasUrl = DEFAULT_GAS_URL;
+    }
+  } catch(e) {}
   _initGasUrlDisplay();
 
   const urlParams = new URLSearchParams(window.location.search);
@@ -1740,7 +1749,8 @@ async function loadResults() {
   const taskName = document.getElementById('results-task').value, area = document.getElementById('results-area');
   if (!taskName) { area.innerHTML = ''; return; } area.innerHTML = '<div class="text-muted small">載入中…</div>';
   try {
-    const results = await API.getTaskResults(taskName);
+    // v13.9.7 fix: 改用 _callJsonpOnly 確保成績即時同步，不受 Worker 快取影響
+    const results = await API._callJsonpOnly('getTaskResults', { taskName });
     if (!results.length) { area.innerHTML = '<p class="text-muted">此任務尚無作答紀錄。</p>'; return; }
     const avg = Math.round(results.reduce((s, r) => s + r.score, 0) / results.length), high = Math.max(...results.map(r => r.score)), low = Math.min(...results.map(r => r.score));
     let html = `<div class="row g-2 mb-3"><div class="col-auto"><div class="alert alert-info py-1 px-3 mb-0">共 <b>${results.length}</b> 份</div></div><div class="col-auto"><div class="alert alert-success py-1 px-3 mb-0">平均 <b>${avg}</b> 分</div></div><div class="col-auto"><div class="alert alert-warning py-1 px-3 mb-0">最高 <b>${high}</b> / 最低 <b>${low}</b></div></div></div>
