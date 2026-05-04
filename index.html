@@ -1790,7 +1790,8 @@ async function loadAnalysis() {
   const taskName = document.getElementById('analysis-task').value, area = document.getElementById('analysis-area');
   if (!taskName) { area.innerHTML = ''; return; } area.innerHTML = '<div class="text-muted small">分析中…</div>';
   try {
-    const nodes = await API.analyzeClassWeakNodes(taskName);
+    // v13.9.7 fix: 改用 _callJsonpOnly 確保差異化分析即時同步
+    const nodes = await API._callJsonpOnly('analyzeClassWeakNodes', { taskName });
     if (!nodes.length) { area.innerHTML = '<p class="text-muted">此任務尚無足夠作答資料。</p>'; return; }
     let html = '<div class="row g-3">';
     nodes.forEach((n, i) => {
