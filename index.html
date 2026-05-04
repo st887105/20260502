@@ -3,16 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <!-- 版號 v13.10.0
-    1. 類似題（_genSimilarViaClaude / GAS兩路）生成後均回存 Bank（GAS 端 saveBatchFromWorker 路徑）
-    2. 補救練習連結 & 示範討論連結整合至 _renderSimResult，不另外重複產生；
-       loadResults 移除舊的「類似題連結區塊」，統一由 _renderSimResult 提供
-    3. 學習單存雲端後顯示 Google Drive 連結（若 GAS 回傳 fileUrl），並附防呆提示
-    4. Gemini 提速：前端不直接呼叫 Gemini，但 Claude Worker 呼叫改加 thinkingBudget:0 hints；
-       GAS 預設模型 fallback 順序調整（前端設定頁預設改為 gemini-2.0-flash）
-    5. 設定 Tab 新增「補救練習節點數」與「補救練習題數」欄位，對應 GAS PracticeNodeCount / PracticeQCount
+  <!-- 版號 v13.10.1
+    v13.10.0 基礎上修正：
+    1. 類似題：改為勾選題目機制。老師勾選後，「示範討論」與「補救練習」連結帶入 qids 參數，
+       practice/demo 頁依 qids 過濾只顯示被勾選的題目
+    2. loadPracticeView / loadDemoView：支援 ?qids=... 參數過濾，改用 _callJsonpOnly 避免 Worker 逾時
+    3. genSimilarPractice：getPracticeSettings 失敗靜默處理，不顯示 Worker 降級警告
+    4. genWorksheet Claude 路徑：優先用 Worker /save-to-drive endpoint 存雲端，
+       有 fileUrl 直接顯示，不依賴 GAS saveWorksheetToCloud 回傳 fileUrl
+    5. 修正 _buildLinkCards 中 qids 即時帶入邏輯
   -->
-  <title>車城國小｜學力檢測 AI 智慧補救系統 (v13.10.0)</title>
+  <title>車城國小｜學力檢測 AI 智慧補救系統 (v13.10.1)</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -107,6 +108,14 @@
     .practice-link-card{background:linear-gradient(135deg,#fff8e1,#fffde7);border:2px solid #ffd54f;border-radius:12px;padding:14px 16px;margin-bottom:10px;}
     .demo-link-card{background:linear-gradient(135deg,#e8f5e9,#f1f8e9);border:2px solid #66bb6a;border-radius:12px;padding:14px 16px;margin-bottom:10px;}
     .ws-drive-link{background:#e8f5e9;border:1px solid #81c784;border-radius:8px;padding:8px 12px;font-size:.82rem;color:#2e7d32;margin-top:8px;}
+    /* ⭐ v13.10.1 勾選題目機制 */
+    .sim-q-card{position:relative;border:2px solid #e0e0e0;border-radius:10px;padding:10px 14px;margin-bottom:8px;transition:border-color .18s,background .18s;}
+    .sim-q-card.sel-card{border-color:#1e88e5;background:#e3f2fd;}
+    .sim-q-checkbox{margin-right:6px;width:16px;height:16px;cursor:pointer;accent-color:#1e88e5;vertical-align:middle;flex-shrink:0;}
+    .sel-badge{display:inline-flex;align-items:center;gap:4px;background:#1e88e5;color:#fff;border-radius:12px;padding:2px 10px;font-size:.8rem;font-weight:700;}
+    .link-box-wrap{border-radius:10px;padding:10px 14px;margin-bottom:8px;}
+    .link-box-wrap.lbw-demo{background:linear-gradient(135deg,#e8f5e9,#f1f8e9);border:2px solid #66bb6a;}
+    .link-box-wrap.lbw-practice{background:linear-gradient(135deg,#fff8e1,#fffde7);border:2px solid #ffd54f;}
   </style>
 </head>
 <body>
@@ -614,7 +623,7 @@
 
 <footer class="mt-4">
   <div class="container px-3">
-    車城國小資訊老師 @ Google Gemini 協作設計 ｜ v13.10.0 ｜
+    車城國小資訊老師 @ Google Gemini 協作設計 ｜ v13.10.1 ｜
     <a href="https://github.com/st887105/20260404" target="_blank"><i class="fa-brands fa-github me-1"></i>原始碼</a>
   </div>
 </footer>
@@ -981,8 +990,8 @@ const API = {
   getGeminiSettings:()=>API._call('getGeminiSettings'),
   updateGeminiSettings:(m,p,pwd)=>API._call('updateGeminiSettings',{model:m,isPaid:p,pwd}),
   getQuestionErrorRates:(n)=>API._call('getQuestionErrorRates',{taskName:n}),
-  getPracticeQuestionsForErrors:(n)=>API._call('getPracticeQuestionsForErrors',{taskName:n}),
-  generateSimilarOnDemand:(taskName,nodes)=>API._call('generateSimilarOnDemand',{taskName,nodes}),
+  getPracticeQuestionsForErrors:(n)=>API._callJsonpOnly('getPracticeQuestionsForErrors',{taskName:n}),
+  generateSimilarOnDemand:(taskName,nodes)=>API._callJsonpOnly('generateSimilarOnDemand',{taskName,nodes}),
   getTaskQuestions:(n)=>API._call('getTaskQuestions',{taskName:n}),
   getHelpUrl:()=>API._call('getHelpUrl'),
   updateHelpUrl:(url,pwd)=>API._call('updateHelpUrl',{url,pwd}),
@@ -990,8 +999,8 @@ const API = {
   getWorksheetFromCloud:(n,g,s)=>API._call('getWorksheetFromCloud',{taskName:n,grade:g,subject:s}),
   deleteTask:(n,pwd)=>API._call('deleteTask',{taskName:n,pwd}),
   // ⭐ v13.10.0 新增：取得補救練習設定
-  getPracticeSettings:()=>API._call('getPracticeSettings'),
-  savePracticeSettings:(nodeCount,qCount,pwd)=>API._call('savePracticeSettings',{nodeCount,qCount,pwd}),
+  getPracticeSettings:()=>API._callJsonpOnly('getPracticeSettings',{}),
+  savePracticeSettings:(nodeCount,qCount,pwd)=>API._callJsonpOnly('savePracticeSettings',{nodeCount,qCount,pwd}),
   // ⭐ v13.10.0 新增：Claude 題目回存 Bank
   saveBatchFromWorker:(taskName,questions)=>API._call('saveBatchFromWorker',{taskName,questions}),
   generateAllBatchClaude: async (nodes, grade, subject) => {
@@ -1926,20 +1935,44 @@ async function genWorksheet() {
     progBar.style.width = '100%'; progMsg.textContent = '✅ 學習單生成完成！';
     app.wsHtml = _sanitizeWsHtml(htmlContent);
 
-    // ⭐ v13.10.0：存雲端並取得 Drive 連結
+    // ⭐ v13.10.1：存雲端
+    // Claude Worker 路徑：優先嘗試 Worker /save-to-drive endpoint（直接存 GDrive）
+    // GAS 路徑：呼叫 saveWorksheetToCloud（若 GAS v13.10.0+ 會回傳 fileUrl）
     let driveFileUrl = null;
     if (taskName) {
-      try {
-        const saveResult = await API.saveWorksheetToCloud(taskName, grade, subject, app.wsHtml);
-        // GAS v13.10.0 回傳 { saved: true, fileUrl: '...', fileId: '...' }
-        if (saveResult && saveResult.fileUrl) {
-          driveFileUrl = saveResult.fileUrl;
-          console.log('[Worksheet] 已儲存至 Google Drive：', driveFileUrl);
-        } else {
-          console.log('[Worksheet] 已儲存至 ScriptProperties（無 Drive URL）');
+      if (app.wsEngine === 'claude') {
+        // Claude Worker 直接存雲端
+        try {
+          const workerUrl = app.claudeWorkerUrl || DEFAULT_CLAUDE_WORKER_URL;
+          const saveResp = await fetch(workerUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              mode: 'save-to-drive',
+              taskName, grade, subject,
+              htmlContent: app.wsHtml
+            })
+          });
+          if (saveResp.ok) {
+            const saveJson = await saveResp.json();
+            if (saveJson.fileUrl) driveFileUrl = saveJson.fileUrl;
+            else if (saveJson.data && saveJson.data.fileUrl) driveFileUrl = saveJson.data.fileUrl;
+          }
+          if (driveFileUrl) console.log('[Worksheet] Claude Worker 存 Drive 成功：', driveFileUrl);
+        } catch(workerSaveErr) {
+          console.warn('[Worksheet] Claude Worker 存 Drive 失敗，改由 GAS：', workerSaveErr.message);
+          // fallback 到 GAS saveWorksheetToCloud
+          try {
+            const saveResult = await API.saveWorksheetToCloud(taskName, grade, subject, app.wsHtml);
+            if (saveResult && saveResult.fileUrl) driveFileUrl = saveResult.fileUrl;
+          } catch(e2) { console.warn('[Worksheet] GAS 儲存也失敗：', e2.message); }
         }
-      } catch(e) {
-        console.warn('[Worksheet] 雲端儲存失敗：' + e.message);
+      } else {
+        // GAS 引擎：呼叫 GAS saveWorksheetToCloud
+        try {
+          const saveResult = await API.saveWorksheetToCloud(taskName, grade, subject, app.wsHtml);
+          if (saveResult && saveResult.fileUrl) driveFileUrl = saveResult.fileUrl;
+        } catch(e) { console.warn('[Worksheet] GAS 雲端儲存失敗：', e.message); }
       }
     }
 
@@ -2016,7 +2049,7 @@ async function genSimilarPractice(taskName, forceRegen) {
       const genBtn = errorNodes.length ? safeId : '';
       // ⭐ v13.10.0：無類似題時仍顯示連結
       area.innerHTML = `
-        ${_buildLinkCards(taskName)}
+        ${_buildLinkBoxes(taskName)}
         <div class="alert alert-info small py-2 mt-2"><i class="fa-solid fa-circle-info me-1"></i>${reason}${genBtn ? '<br><button id="' + genBtn + '" class="btn btn-warning btn-sm mt-2"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>立即 AI 生成類似題</button>' : ''}</div>`;
       if (genBtn) {
         document.getElementById(genBtn).addEventListener('click', function() {
@@ -2033,71 +2066,158 @@ async function genSimilarPractice(taskName, forceRegen) {
     if (errMsg.includes('end of input') || errMsg.includes('JSON') || errMsg.includes('parse')) {
       errMsg = 'GAS 回應格式錯誤，請確認已部署最新版 GAS';
     }
-    area.innerHTML = `${_buildLinkCards(taskName)}<div class="alert alert-danger small py-2 mt-2"><i class="fa-solid fa-triangle-exclamation me-1"></i>${errMsg}</div>`;
+    area.innerHTML = `${_buildLinkBoxes(taskName)}<div class="alert alert-danger small py-2 mt-2"><i class="fa-solid fa-triangle-exclamation me-1"></i>${errMsg}</div>`;
   }
 }
 
-// ⭐ v13.10.0 新增：統一產生示範討論 + 補救練習連結卡片 HTML
-function _buildLinkCards(taskName) {
-  const demoUrl     = `${window.location.origin}${window.location.pathname}?demo=${encodeURIComponent(taskName)}`;
-  const practiceUrl = `${window.location.origin}${window.location.pathname}?practice=${encodeURIComponent(taskName)}`;
-  return `
-  <div class="demo-link-card mb-2">
+// ⭐ v13.10.1 勾選題目機制：老師勾選類似題後才更新連結 URL（帶 qids 參數）
+const _simSelectedIds = {};
+
+function _buildLinkBoxes(taskName) {
+  const sel = _simSelectedIds[taskName] || new Set();
+  const qidsStr = [...sel].map(s => encodeURIComponent(s)).join(',');
+  const base = window.location.origin + window.location.pathname;
+  const demoUrl = base + '?demo=' + encodeURIComponent(taskName) + (qidsStr ? '&qids=' + qidsStr : '');
+  const practiceUrl = base + '?practice=' + encodeURIComponent(taskName) + (qidsStr ? '&qids=' + qidsStr : '');
+  const selCount = sel.size;
+  const selTip = selCount > 0
+    ? `<span class="sel-badge ms-2"><i class="fa-solid fa-check me-1"></i>已選 ${selCount} 題</span>`
+    : '<span class="text-muted small ms-2">（未勾選 = 顯示全部題目）</span>';
+  return `<div id="sim-link-boxes">
+  <div class="small fw-bold text-muted mb-2">
+    <i class="fa-solid fa-hand-pointer me-1 text-primary"></i>勾選下方題目後，連結自動更新 ${selTip}
+  </div>
+  <div class="link-box-wrap lbw-demo mb-2">
     <div class="fw-bold small text-success mb-1">
       <i class="fa-solid fa-chalkboard-teacher me-1"></i>教師示範討論連結
       <span class="badge bg-success ms-1" style="font-size:.65rem;">無答案｜課堂討論用</span>
     </div>
     <div class="d-flex gap-2 flex-wrap align-items-center">
-      <a href="${demoUrl}" target="_blank" class="btn btn-success btn-sm"><i class="fa-solid fa-external-link-alt me-1"></i>開啟示範討論頁</a>
-      <button class="btn btn-outline-success btn-sm" onclick="copyText('${demoUrl.replace(/'/g,"\\'")}')"><i class="fa-solid fa-copy me-1"></i>複製連結</button>
-      <span class="small text-muted text-truncate" style="max-width:280px;">${demoUrl}</span>
+      <a id="sim-demo-link" href="${demoUrl}" target="_blank" class="btn btn-success btn-sm">
+        <i class="fa-solid fa-external-link-alt me-1"></i>開啟示範討論頁
+      </a>
+      <button class="btn btn-outline-success btn-sm" onclick="copyText(document.getElementById('sim-demo-link').href)">
+        <i class="fa-solid fa-copy me-1"></i>複製連結
+      </button>
+      <span id="sim-demo-url-display" class="small text-muted" style="word-break:break-all;">${demoUrl}</span>
     </div>
   </div>
-  <div class="practice-link-card mb-2">
+  <div class="link-box-wrap lbw-practice">
     <div class="fw-bold small text-warning mb-1">
       <i class="fa-solid fa-dumbbell me-1"></i>學生補救練習連結
       <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem;">不顯示答案・不計分</span>
     </div>
     <div class="d-flex gap-2 flex-wrap align-items-center">
-      <a href="${practiceUrl}" target="_blank" class="btn btn-warning btn-sm"><i class="fa-solid fa-external-link-alt me-1"></i>開啟補救練習</a>
-      <button class="btn btn-outline-secondary btn-sm" onclick="copyText('${practiceUrl.replace(/'/g,"\\'")}')"><i class="fa-solid fa-copy me-1"></i>複製連結</button>
-      <span class="small text-muted text-truncate" style="max-width:280px;">${practiceUrl}</span>
+      <a id="sim-practice-link" href="${practiceUrl}" target="_blank" class="btn btn-warning btn-sm">
+        <i class="fa-solid fa-external-link-alt me-1"></i>開啟補救練習
+      </a>
+      <button class="btn btn-outline-secondary btn-sm" onclick="copyText(document.getElementById('sim-practice-link').href)">
+        <i class="fa-solid fa-copy me-1"></i>複製連結
+      </button>
+      <span id="sim-practice-url-display" class="small text-muted" style="word-break:break-all;">${practiceUrl}</span>
     </div>
-  </div>`;
+  </div>
+</div>`;
+}
+
+function _updateSimLinks(taskName) {
+  const sel = _simSelectedIds[taskName] || new Set();
+  const qidsStr = [...sel].map(s => encodeURIComponent(s)).join(',');
+  const base = window.location.origin + window.location.pathname;
+  const demoUrl = base + '?demo=' + encodeURIComponent(taskName) + (qidsStr ? '&qids=' + qidsStr : '');
+  const practiceUrl = base + '?practice=' + encodeURIComponent(taskName) + (qidsStr ? '&qids=' + qidsStr : '');
+  const dLink = document.getElementById('sim-demo-link');
+  const pLink = document.getElementById('sim-practice-link');
+  const dDisp = document.getElementById('sim-demo-url-display');
+  const pDisp = document.getElementById('sim-practice-url-display');
+  if (dLink) dLink.href = demoUrl;
+  if (pLink) pLink.href = practiceUrl;
+  if (dDisp) dDisp.textContent = demoUrl;
+  if (pDisp) pDisp.textContent = practiceUrl;
+  // 更新徽章
+  const tipEl = document.querySelector('#sim-link-boxes .sel-badge, #sim-link-boxes .text-muted.small.ms-2');
+  if (tipEl) {
+    const selCount = sel.size;
+    if (selCount > 0) {
+      tipEl.className = 'sel-badge ms-2';
+      tipEl.innerHTML = `<i class="fa-solid fa-check me-1"></i>已選 ${selCount} 題`;
+    } else {
+      tipEl.className = 'text-muted small ms-2';
+      tipEl.textContent = '（未勾選 = 顯示全部題目）';
+    }
+  }
+}
+
+function toggleSimQ(taskName, qid, checkbox) {
+  if (!_simSelectedIds[taskName]) _simSelectedIds[taskName] = new Set();
+  const sel = _simSelectedIds[taskName];
+  if (checkbox.checked) sel.add(qid); else sel.delete(qid);
+  const card = checkbox.closest('.sim-q-card');
+  if (card) card.classList.toggle('sel-card', checkbox.checked);
+  _updateSimLinks(taskName);
 }
 
 function _renderSimResult(area, data, taskName) {
-  let previewHtml = '';
-  data.forEach(item => {
-    previewHtml += `<div class="card mb-3 border-warning"><div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center"><span class="fw-bold small">【${esc(item.node)}】</span><span class="badge bg-danger">${item.errorCount || item.questions?.length || 0} 筆錯誤</span></div><div class="card-body p-2">`;
+  if (!_simSelectedIds[taskName]) _simSelectedIds[taskName] = new Set();
+  const escapedTask = taskName.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+
+  let cardsHtml = '';
+  let globalQIdx = 0;
+  data.forEach((item) => {
+    cardsHtml += `<div class="mb-3">
+      <div class="d-flex align-items-center mb-2">
+        <span class="fw-bold small me-2">【${esc(item.node)}】</span>
+        <span class="badge bg-danger small">${item.errorCount || item.questions?.length || 0} 筆錯誤</span>
+      </div>`;
     (item.questions || []).forEach((q, qi) => {
-      const lvBg = { A: '#d32f2f', B: '#f57c00', C: '#388e3c', D: '#1565c0' }, lv = (q.hint?.match(/Level ([ABCD])/) || [])[1] || q.level || 'D';
-      previewHtml += `<div class="border rounded p-2 mb-2"><div class="d-flex justify-content-between align-items-start mb-1"><span class="small text-muted fw-bold">類似題 ${qi + 1}</span><span class="badge text-white" style="background:${lvBg[lv] || '#9e9e9e'}">Level ${lv}</span></div><div class="small mb-2" style="white-space:pre-wrap;word-break:break-word;line-height:1.6">${esc(q.text)}</div>${q.type === 'single' ? (q.options || []).map((o, oi) => { const isAns = 'ABCD'[oi] === q.answer; return `<div class="d-flex align-items-start gap-1 py-1 border-bottom"><span class="badge ${isAns ? 'bg-success' : 'bg-light text-dark border'} flex-shrink-0">${'ABCD'[oi]}</span><span class="small">${esc(o)}</span></div>`; }).join('') : ''}<div class="small text-success mt-2 fw-bold">✅ 正解：${esc(q.answer)}</div>${q.hint ? `<div class="small text-secondary mt-1">💡 ${esc(q.hint.replace(/^\[Level [ABCD]\]\s*/, ''))}</div>` : ''}</div>`;
+      const lvBg = { A: '#d32f2f', B: '#f57c00', C: '#388e3c', D: '#1565c0' };
+      const lv = (q.hint?.match(/Level ([ABCD])/) || [])[1] || q.level || 'D';
+      const qid = String(q.id || (item.node + '__' + qi));
+      const cbId = 'simcb_' + globalQIdx;
+      globalQIdx++;
+      const safeQidAttr = qid.replace(/"/g, '&quot;');
+      const opts = q.type === 'single' ? (q.options || []).map((o, oi) => {
+        const isAns = 'ABCD'[oi] === q.answer;
+        return `<div class="d-flex align-items-start gap-1 py-1 border-bottom">
+          <span class="badge ${isAns ? 'bg-success' : 'bg-light text-dark border'} flex-shrink-0">${'ABCD'[oi]}</span>
+          <span class="small">${esc(o)}</span>
+        </div>`;
+      }).join('') : '';
+      const hintHtml = q.hint ? `<div class="small text-secondary mt-1">💡 ${esc(q.hint.replace(/^\[Level [ABCD]\]\s*/, ''))}</div>` : '';
+      cardsHtml += `<div class="sim-q-card" id="sqcard_${cbId}">
+        <div class="d-flex align-items-start gap-2 mb-2">
+          <input type="checkbox" class="sim-q-checkbox" id="${cbId}"
+            onchange="toggleSimQ('${escapedTask}','${safeQidAttr}',this)">
+          <label for="${cbId}" class="small fw-bold text-muted mb-0 flex-grow-1" style="cursor:pointer;">
+            類似題 ${qi + 1}
+            <span class="badge text-white ms-1" style="background:${lvBg[lv]||'#9e9e9e'}">Level ${lv}</span>
+          </label>
+        </div>
+        <div class="small mb-2" style="white-space:pre-wrap;word-break:break-word;line-height:1.6">${esc(q.text)}</div>
+        ${opts}
+        <div class="small text-success mt-2 fw-bold">✅ 正解：${esc(q.answer)}</div>
+        ${hintHtml}
+      </div>`;
     });
-    previewHtml += `</div></div>`;
+    cardsHtml += `</div>`;
   });
-  const escapedTask = taskName.replace(/'/g, "\\'");
-  // ⭐ v13.10.0：連結卡片統一由 _buildLinkCards 提供，不另外在此產生
+
   area.innerHTML = `
-    ${_buildLinkCards(taskName)}
+    ${_buildLinkBoxes(taskName)}
     <div class="d-flex gap-2 flex-wrap align-items-center mb-2 mt-3">
       <h6 class="fw-bold mb-0"><i class="fa-solid fa-dumbbell text-warning me-1"></i>錯誤類似題（共 ${data.length} 個節點）</h6>
-      <button class="btn btn-outline-secondary btn-sm" id="sim-toggle-btn" onclick="toggleSimPreview()"><i class="fa-solid fa-eye me-1"></i>展開預覽</button>
-      <button class="btn btn-outline-warning btn-sm" onclick="genSimilarPractice('${escapedTask}', true)"><i class="fa-solid fa-rotate me-1"></i>重新生成</button>
+      <button class="btn btn-outline-secondary btn-sm" id="sim-toggle-btn" onclick="toggleSimPreview()">
+        <i class="fa-solid fa-eye-slash me-1"></i>收起預覽
+      </button>
+      <button class="btn btn-outline-warning btn-sm" onclick="genSimilarPractice('${escapedTask}', true)">
+        <i class="fa-solid fa-rotate me-1"></i>重新生成
+      </button>
     </div>
-    <div id="sim-preview-area" style="display:none;"><div class="border rounded p-3 bg-white">${previewHtml}</div></div>`;
-  app_sim.previewOpen = false;
-  setTimeout(() => {
-    const prev = document.getElementById('sim-preview-area');
-    const btn = document.getElementById('sim-toggle-btn');
-    if (prev && btn && prev.style.display === 'none') {
-      prev.style.display = '';
-      btn.innerHTML = '<i class="fa-solid fa-eye-slash me-1"></i>收起預覽';
-      app_sim.previewOpen = true;
-    }
-  }, 100);
+    <div id="sim-preview-area">
+      <div class="border rounded p-3 bg-white">${cardsHtml}</div>
+    </div>`;
+  app_sim.previewOpen = true;
 }
-
 // ⭐ v13.10.0：類似題回存 Bank 輔助
 async function _saveSimilarToBank(taskName, questions) {
   if (!questions || !questions.length) return;
@@ -2392,6 +2512,10 @@ async function finishQuiz() {
 const _practiceAnswers = {};
 
 async function loadPracticeView(taskName) {
+  const urlParams = new URLSearchParams(window.location.search);
+  const qidsParam = urlParams.get('qids') || '';
+  const allowedIds = qidsParam ? qidsParam.split(',').map(s => decodeURIComponent(s.trim())).filter(Boolean) : null;
+
   const infoEl = document.getElementById('practice-task-info');
   const area = document.getElementById('practice-questions-area');
   const submitArea = document.getElementById('practice-submit-area');
@@ -2400,11 +2524,32 @@ async function loadPracticeView(taskName) {
   area.innerHTML = '<div class="text-muted"><i class="fa-solid fa-spinner fa-spin me-1"></i>載入練習題目中…</div>';
 
   try {
-    const res = await API._callDirect('getTaskQuestions', { taskName });
-    const qs = (res.questions || []).slice(0, 2);
+    // 改用 _callJsonpOnly 避免 Worker 逾時
+    const res = await API._callJsonpOnly('getTaskQuestions', { taskName });
+    let qs = res.questions || [];
 
-    if (infoEl) infoEl.innerHTML = `任務：<b>${esc(taskName)}</b>｜${esc(res.grade||'')} / ${esc(res.subject||'')}｜練習題 <b>${qs.length}</b> 題`;
-    if (!qs.length) {
+    // 若有 qids 參數，篩選指定題目
+    if (allowedIds && allowedIds.length > 0) {
+      qs = qs.filter(q => {
+        const qid = String(q.id || '');
+        return allowedIds.includes(qid) || allowedIds.some(aid => aid === qid);
+      });
+      // 若 qids 是 node__qi 格式（前端動態生成的），用節點+索引比對
+      if (!qs.length) {
+        const allQs = res.questions || [];
+        qs = allowedIds.map(aid => {
+          const m = aid.match(/^(.+)__(\d+)$/);
+          if (!m) return null;
+          const [, node, qiStr] = m;
+          const nodeQs = allQs.filter(q => q.node === node);
+          return nodeQs[parseInt(qiStr)] || null;
+        }).filter(Boolean);
+      }
+    }
+
+    const displayCount = qs.length;
+    if (infoEl) infoEl.innerHTML = `任務：<b>${esc(taskName)}</b>｜${esc(res.grade||'')} / ${esc(res.subject||'')}｜練習題 <b>${displayCount}</b> 題${allowedIds ? '（老師指定）' : ''}`;
+    if (!displayCount) {
       area.innerHTML = '<div class="alert alert-warning">此任務尚無題目，請等老師完成出題。</div>';
       return;
     }
@@ -2419,22 +2564,18 @@ async function loadPracticeView(taskName) {
     qs.forEach((q, qi) => {
       const lv = q.level || 'D';
       const {passage, stem} = _parseQuestionText(q.text || '', isChinese);
-
       html += `<div class="border rounded p-3 mb-4 bg-white" id="pq-card-${qi}">
         <div class="d-flex justify-content-between align-items-start mb-2">
-          <span class="fw-bold text-muted">第 ${qi+1} 題</span>
+          <span class="fw-bold text-muted">第 ${qi+1} 題【${esc(q.node||'')}】</span>
           <span class="badge text-white" style="background:${lvColor[lv]||'#9e9e9e'}">Level ${lv}</span>
         </div>`;
-
       if (passage) {
         html += `<div class="reading-passage mb-3">
           <span class="reading-passage-label">📖 閱讀短文</span>
           <div class="reading-passage-text">${esc(passage)}</div>
         </div>`;
       }
-
       html += `<div class="mb-3"><span class="quiz-question-stem">${esc(stem)}</span></div>`;
-
       if (q.type === 'single' && q.options && q.options.length) {
         html += `<div class="practice-options" id="pq-opts-${qi}">`;
         q.options.forEach((opt, oi) => {
@@ -2446,13 +2587,10 @@ async function loadPracticeView(taskName) {
         });
         html += `</div>`;
       }
-
       html += `<div class="practice-hint mt-2 p-2 bg-light rounded small text-muted" id="pq-hint-${qi}" style="display:none;">
         <i class="fa-solid fa-lightbulb text-warning me-1"></i>
         ${q.hint ? esc(q.hint.replace(/^\[Level [ABCD]\]\s*/,'')) : '（無額外提示）'}
-      </div>`;
-
-      html += `</div>`;
+      </div></div>`;
     });
 
     area.innerHTML = html;
@@ -2510,25 +2648,50 @@ function submitPractice() {
 // 🖥️ 教師示範討論頁
 // ==========================================
 async function loadDemoView(taskName) {
+  const urlParams = new URLSearchParams(window.location.search);
+  const qidsParam = urlParams.get('qids') || '';
+  const allowedIds = qidsParam ? qidsParam.split(',').map(s => decodeURIComponent(s.trim())).filter(Boolean) : null;
+
   const infoEl = document.getElementById('demo-task-info');
   const area = document.getElementById('demo-questions-area');
   if (infoEl) infoEl.textContent = '載入中…';
   area.innerHTML = '<div class="text-muted"><i class="fa-solid fa-spinner fa-spin me-1"></i>載入題目中…</div>';
   try {
-    const res = await API._callDirect('getTaskQuestions', { taskName });
-    const qs = res.questions || [];
-    if (infoEl) infoEl.innerHTML = `任務：<b>${esc(taskName)}</b>｜${esc(res.grade||'')} / ${esc(res.subject||'')}｜共 <b>${qs.length}</b> 題`;
+    // 改用 _callJsonpOnly 避免 Worker 逾時
+    const res = await API._callJsonpOnly('getTaskQuestions', { taskName });
+    let qs = res.questions || [];
+
+    // 若有 qids 參數，篩選指定題目
+    if (allowedIds && allowedIds.length > 0) {
+      const filteredById = qs.filter(q => allowedIds.includes(String(q.id || '')));
+      if (filteredById.length > 0) {
+        qs = filteredById;
+      } else {
+        // node__qi 格式比對
+        const allQs = [...qs];
+        qs = allowedIds.map(aid => {
+          const m = aid.match(/^(.+)__(\d+)$/);
+          if (!m) return null;
+          const [, node, qiStr] = m;
+          const nodeQs = allQs.filter(q => q.node === node);
+          return nodeQs[parseInt(qiStr)] || null;
+        }).filter(Boolean);
+      }
+    }
+
+    if (infoEl) infoEl.innerHTML = `任務：<b>${esc(taskName)}</b>｜${esc(res.grade||'')} / ${esc(res.subject||'')}｜共 <b>${qs.length}</b> 題${allowedIds ? '（老師指定）' : ''}`;
     if (!qs.length) { area.innerHTML = '<div class="alert alert-warning">此任務尚無題目，請先完成出題。</div>'; return; }
+
     const byNode = {};
     qs.forEach(q => { const nd = q.node || '未分類'; if (!byNode[nd]) byNode[nd] = []; byNode[nd].push(q); });
     const lvColor = {A:'#d32f2f',B:'#f57c00',C:'#388e3c',D:'#1565c0'};
     let html = '', qNum = 0;
+    const isChinese = (res.subject === '國語');
     Object.keys(byNode).forEach(node => {
       html += `<div class="mb-4"><h6 class="fw-bold text-primary border-bottom pb-1 mb-3">【${esc(node)}】</h6>`;
       byNode[node].forEach(q => {
         qNum++;
         const lv = q.level || 'D';
-        const isChinese = (res.subject === '國語');
         const {passage, stem} = _parseQuestionText(q.text || '', isChinese);
         html += `<div class="border rounded p-3 mb-3 bg-white"><div class="d-flex justify-content-between align-items-start mb-2"><span class="fw-bold text-muted small">第 ${qNum} 題</span><span class="badge text-white" style="background:${lvColor[lv]||'#9e9e9e'}">Level ${lv}</span></div>`;
         if (passage) {
