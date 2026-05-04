@@ -1995,11 +1995,21 @@ function _renderSimResult(area, data, taskName) {
     <div class="d-flex gap-2 flex-wrap align-items-center mb-2 mt-3"><h6 class="fw-bold mb-0"><i class="fa-solid fa-dumbbell text-warning me-1"></i>錯誤類似題（共 ${data.length} 個節點）</h6><button class="btn btn-outline-secondary btn-sm" id="sim-toggle-btn" onclick="toggleSimPreview()"><i class="fa-solid fa-eye me-1"></i>展開預覽</button><button class="btn btn-outline-warning btn-sm" onclick="genSimilarPractice('${escapedTask}', true)"><i class="fa-solid fa-rotate me-1"></i>重新生成</button></div>
     <div id="sim-preview-area" style="display:none;"><div class="border rounded p-3 bg-white">${previewHtml}</div></div>`;
   app_sim.previewOpen = false;
+  // 自動展開預覽
+  setTimeout(() => {
+    const prev = document.getElementById('sim-preview-area');
+    const btn = document.getElementById('sim-toggle-btn');
+    if (prev && btn && prev.style.display === 'none') {
+      prev.style.display = '';
+      btn.innerHTML = '<i class="fa-solid fa-eye-slash me-1"></i>收起預覽';
+      app_sim.previewOpen = true;
+    }
+  }, 100);
 }
 
 // 透過 Claude Worker 即時生成類似題
 async function _genSimilarViaClaude(taskName, nodes) {
-  const workerUrl = getClaudeWorkerUrl();
+  const workerUrl = app.claudeWorkerUrl || DEFAULT_CLAUDE_WORKER_URL;
   // 取得任務的 grade/subject
   let grade = '三年級', subject = '數學';
   try {
@@ -2011,21 +2021,26 @@ async function _genSimilarViaClaude(taskName, nodes) {
   const nodeList = nodes.slice(0, 3).map((n, i) => (i + 1) + '. [' + n + ']').join('\n');
   const prompt = '你是一位台灣小學' + subject + '老師，請針對以下弱點節點，為' + grade + '學生出 2 題選擇題（每題 4 選項）作為補救練習。\n節點：\n' + nodeList + '\n\n請用 JSON 陣列回傳，格式：[{"node":"節點名","text":"題目","options":["A...","B...","C...","D..."],"answer":"A","hint":"提示","level":"C"}]，只回傳 JSON 不要其他文字。';
 
-  const resp = await fetch(workerUrl + '/worksheet', {
+  const resp = await fetch(workerUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, taskName, grade, subject, mode: 'similar' })
+    body: JSON.stringify({ mode: 'questions', nodes, grade, subject, qcount: 2 })
   });
   if (!resp.ok) throw new Error('Claude Worker HTTP ' + resp.status);
   const json = await resp.json();
   // 解析回應
   let questions = [];
-  const raw = json.html || json.content || json.result || '';
-  try {
-    const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/, '').trim();
-    const arr = JSON.parse(clean);
-    if (Array.isArray(arr)) questions = arr;
-  } catch(e) { throw new Error('Claude 回應格式錯誤：' + raw.slice(0, 100)); }
+  // Worker questions mode 直接回傳 questions 陣列
+  if (json.status === 'success' && Array.isArray(json.questions)) {
+    questions = json.questions;
+  } else {
+    const raw = json.content || json.html || json.result || json.rawText || '';
+    try {
+      const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/, '').trim();
+      const arr = JSON.parse(clean);
+      if (Array.isArray(arr)) questions = arr;
+    } catch(e) { throw new Error('Claude 回應格式錯誤：' + raw.slice(0, 100)); }
+  }
   return questions;
 }
 
@@ -2067,9 +2082,11 @@ async function genSimilarOnDemand(taskName, nodes, btn, mode) {
     }
     // 組合成 _renderSimResult 格式
     const nodeMap = {};
-    questions.forEach(q => {
-      if (!nodeMap[q.node]) nodeMap[q.node] = { node: q.node, errorCount: 1, questions: [] };
-      nodeMap[q.node].questions.push(q);
+    questions.forEach((q, qi) => {
+      const nodeKey = q.node || nodes[0] || '補救練習';
+      if (!q.node) q.node = nodeKey;
+      if (!nodeMap[nodeKey]) nodeMap[nodeKey] = { node: nodeKey, errorCount: 1, questions: [] };
+      nodeMap[nodeKey].questions.push(q);
     });
     const data = Object.values(nodeMap);
     app_sim.data = data; app_sim.taskName = taskName;
