@@ -411,13 +411,13 @@
                     </div>
                     <!-- ⭐ v13.10.0：Drive 連結顯示區 -->
                     <div id="ws-drive-link-area" style="display:none;" class="ws-drive-link mt-2">
-                      <i class="fa-brands fa-google-drive me-1"></i>
-                      <b>雲端備份：</b>
-                      <a id="ws-drive-link-anchor" href="#" target="_blank" rel="noopener">點此開啟 Google Drive 檔案</a>
-                      <span class="text-muted ms-2 small">（連結有效，可分享給學生）</span>
+                      <i class="fa-solid fa-file-pdf me-1"></i>
+                      <b>雲端 PDF：</b>
+                      <a id="ws-drive-link-anchor" href="#" target="_blank" rel="noopener">點此開啟 PDF 學習單</a>
+                      <span class="text-muted ms-2 small">（可分享給學生，或直接下載列印）</span>
                     </div>
                     <div id="ws-drive-link-warn" class="alert alert-warning py-1 px-2 small mt-2" style="display:none;">
-                      <i class="fa-solid fa-triangle-exclamation me-1"></i>此學習單尚未備份至 Google Drive，請確認 GAS 版本是否支援（v13.10.0+）。
+                      <i class="fa-solid fa-triangle-exclamation me-1"></i>此學習單尚未儲存至 Google Drive（PDF 格式），請重新生成後自動儲存。
                     </div>
                     <div id="ws-preview-area" style="display:none;">
                       <iframe id="ws-preview-frame" title="差異化學習單預覽" scrolling="yes"></iframe>
@@ -1833,25 +1833,26 @@ async function loadAnalysis() {
     wsArea.dataset.nodes = JSON.stringify(nodes.slice(0, 3).map(n => n.node));
     wsArea.dataset.taskname = taskName;
 
+    // ⭐ v13.10.3：getWorksheetFromCloud 不再回傳 htmlContent（改存 PDF）
+    // 只檢查是否有 Drive PDF 連結，有就顯示徽章與連結
     let cloudLoaded = false;
     try {
       const stored = await API.getWorksheetFromCloud(taskName, task?.grade || '', task?.subject || '');
-      if (stored && stored.htmlContent) {
-        app.wsHtml = _sanitizeWsHtml(stored.htmlContent);
-        app.wsPreviewOpen = false;
+      if (stored && stored.fileUrl) {
+        // 有 PDF 連結 → 顯示 done 區塊（無法 iframe 預覽 PDF，隱藏預覽按鈕）
         document.getElementById('ws-state-idle').style.display = 'none';
         document.getElementById('ws-gen-progress').style.display = 'none';
         document.getElementById('ws-state-done').style.display = '';
         document.getElementById('ws-preview-area').style.display = 'none';
-        document.getElementById('ws-toggle-btn').innerHTML = '<i class="fa-solid fa-eye me-1"></i>展開預覽';
-        // ⭐ v13.10.0：顯示 Drive 連結（若有）
-        _showWsDriveLink(stored.fileUrl || null);
+        const toggleBtn = document.getElementById('ws-toggle-btn');
+        if (toggleBtn) toggleBtn.style.display = 'none'; // PDF 無法 iframe 預覽
+        _showWsDriveLink(stored.fileUrl);
         const wsCard = wsArea.querySelector('.ws-mgmt-card');
         if (wsCard) {
-          const old = wsCard.querySelector('.ws-cloud-badge'); if (old) old.remove();
+          const oldBadge = wsCard.querySelector('.ws-cloud-badge'); if (oldBadge) oldBadge.remove();
           const badge = document.createElement('span');
           badge.className = 'ws-cloud-badge badge bg-info text-dark ms-2 small';
-          badge.innerHTML = '<i class="fa-solid fa-cloud me-1"></i>已載入雲端版本';
+          badge.innerHTML = '<i class="fa-solid fa-file-pdf me-1"></i>已有雲端 PDF';
           wsCard.querySelector('h6').appendChild(badge);
         }
         cloudLoaded = true;
