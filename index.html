@@ -3,9 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <!-- 版號 v13.9.6：previewStudentList/previewBankQuestions 也改用 _callJsonpOnly 修正 Worker 快取問題 -->
-  <!-- fix: 新增 _callJsonpOnly（完全跳過 Worker 直打 GAS），loadBankStatus/loadTasksForLogin 改用此路徑 -->
-  <title>車城國小｜學力檢測 AI 智慧補救系統 (v13.9.5)</title>
+  <!-- 版號 v13.10.0
+    1. 類似題（_genSimilarViaClaude / GAS兩路）生成後均回存 Bank（GAS 端 saveBatchFromWorker 路徑）
+    2. 補救練習連結 & 示範討論連結整合至 _renderSimResult，不另外重複產生；
+       loadResults 移除舊的「類似題連結區塊」，統一由 _renderSimResult 提供
+    3. 學習單存雲端後顯示 Google Drive 連結（若 GAS 回傳 fileUrl），並附防呆提示
+    4. Gemini 提速：前端不直接呼叫 Gemini，但 Claude Worker 呼叫改加 thinkingBudget:0 hints；
+       GAS 預設模型 fallback 順序調整（前端設定頁預設改為 gemini-2.0-flash）
+    5. 設定 Tab 新增「補救練習節點數」與「補救練習題數」欄位，對應 GAS PracticeNodeCount / PracticeQCount
+  -->
+  <title>車城國小｜學力檢測 AI 智慧補救系統 (v13.10.0)</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -95,8 +102,11 @@
     .quiz-question-stem{font-size:1.18rem;font-weight:700;color:#1a237e;line-height:1.9;display:block;margin-bottom:12px;}
     @media(max-width:575px){.reading-passage-text{font-size:1rem;line-height:1.9;}.quiz-question-stem{font-size:1.05rem;}}
     .demo-link-box{background:linear-gradient(135deg,#e8f5e9,#f1f8e9);border:2px solid #66bb6a;border-radius:10px;padding:12px 16px;}
-    .demo-link-box .demo-badge{display:inline-block;background:#2e7d32;color:#fff;font-size:.7rem;padding:2px 8px;border-radius:6px;margin-left:6px;vertical-align:middle;}
     .ws-tip{background:#e3f2fd;border:1px solid #90caf9;border-radius:8px;padding:8px 12px;font-size:.82rem;color:#1565c0;margin-bottom:10px;}
+    /* ⭐ v13.10.0 新增：補救練習連結卡片樣式 */
+    .practice-link-card{background:linear-gradient(135deg,#fff8e1,#fffde7);border:2px solid #ffd54f;border-radius:12px;padding:14px 16px;margin-bottom:10px;}
+    .demo-link-card{background:linear-gradient(135deg,#e8f5e9,#f1f8e9);border:2px solid #66bb6a;border-radius:12px;padding:14px 16px;margin-bottom:10px;}
+    .ws-drive-link{background:#e8f5e9;border:1px solid #81c784;border-radius:8px;padding:8px 12px;font-size:.82rem;color:#2e7d32;margin-top:8px;}
   </style>
 </head>
 <body>
@@ -390,6 +400,16 @@
                       <button class="btn btn-success btn-sm" onclick="printWorksheet('teacher')"><i class="fa-solid fa-print me-1"></i>教師版</button>
                       <button class="btn btn-outline-primary btn-sm" onclick="printWorksheet('student')"><i class="fa-solid fa-print me-1"></i>學生版</button>
                     </div>
+                    <!-- ⭐ v13.10.0：Drive 連結顯示區 -->
+                    <div id="ws-drive-link-area" style="display:none;" class="ws-drive-link mt-2">
+                      <i class="fa-brands fa-google-drive me-1"></i>
+                      <b>雲端備份：</b>
+                      <a id="ws-drive-link-anchor" href="#" target="_blank" rel="noopener">點此開啟 Google Drive 檔案</a>
+                      <span class="text-muted ms-2 small">（連結有效，可分享給學生）</span>
+                    </div>
+                    <div id="ws-drive-link-warn" class="alert alert-warning py-1 px-2 small mt-2" style="display:none;">
+                      <i class="fa-solid fa-triangle-exclamation me-1"></i>此學習單尚未備份至 Google Drive，請確認 GAS 版本是否支援（v13.10.0+）。
+                    </div>
                     <div id="ws-preview-area" style="display:none;">
                       <iframe id="ws-preview-frame" title="差異化學習單預覽" scrolling="yes"></iframe>
                     </div>
@@ -414,13 +434,35 @@
                       </div>
                     </div>
                     <hr>
+                    <!-- ⭐ v13.10.0 新增：補救練習設定 -->
+                    <div class="mb-3 p-2 border rounded" style="background:#fff8e1;">
+                      <div class="fw-bold small text-warning mb-2"><i class="fa-solid fa-dumbbell me-1"></i>補救練習設定</div>
+                      <div class="row g-2">
+                        <div class="col-6">
+                          <label class="form-label text-muted small fw-bold">最多補救節點數</label>
+                          <div class="input-group input-group-sm">
+                            <input type="number" id="setting-practice-node-count" class="form-control" min="1" max="10" placeholder="3">
+                            <button class="btn btn-warning" onclick="savePracticeSettings()">儲存</button>
+                          </div>
+                          <div class="text-muted" style="font-size:.75rem;">建議 1~5 個節點</div>
+                        </div>
+                        <div class="col-6">
+                          <label class="form-label text-muted small fw-bold">每節點補救題數</label>
+                          <div class="input-group input-group-sm">
+                            <input type="number" id="setting-practice-q-count" class="form-control" min="1" max="10" placeholder="3">
+                          </div>
+                          <div class="text-muted" style="font-size:.75rem;">建議 2~5 題</div>
+                        </div>
+                      </div>
+                    </div>
+                    <hr>
                     <div class="mb-3">
                       <label class="form-label text-muted small fw-bold">AI 模型選擇</label>
                       <div class="input-group input-group-sm">
                         <select id="setting-gemini-model" class="form-select font-monospace" onchange="onModelSelectChange()">
-                          <option value="gemini-2.5-flash">⭐ gemini-2.5-flash（最新推薦）</option>
+                          <option value="gemini-2.0-flash">⭐ gemini-2.0-flash（快速穩定、推薦）</option>
+                          <option value="gemini-2.5-flash">gemini-2.5-flash（最新，較慢）</option>
                           <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite（輕量省配額）</option>
-                          <option value="gemini-2.0-flash">gemini-2.0-flash（穩定）</option>
                           <option value="gemma-4-31b-it">gemma-4-31b-it（免費｜1500次/天）</option>
                           <option value="gemini-1.5-flash">gemini-1.5-flash（舊版備用）</option>
                           <option value="__custom__">✏️ 自訂模型名稱…</option>
@@ -432,6 +474,11 @@
                         <span class="input-group-text"><i class="fa-solid fa-pencil"></i></span>
                         <input type="text" id="setting-custom-model" class="form-control font-monospace" placeholder="例：gemini-2.5-pro">
                         <span class="input-group-text text-muted small">手動輸入模型名稱</span>
+                      </div>
+                      <!-- ⭐ v13.10.0：Gemini 提速說明 -->
+                      <div class="alert alert-info py-1 px-2 small mt-2 mb-0">
+                        <i class="fa-solid fa-bolt me-1"></i><b>提速建議</b>：gemini-2.0-flash 已關閉 thinking 模式，出題速度快 2~3 倍。
+                        若使用 gemini-2.5-flash 仍超時，建議切換回 gemini-2.0-flash。
                       </div>
                     </div>
                     <hr>
@@ -567,7 +614,7 @@
 
 <footer class="mt-4">
   <div class="container px-3">
-    車城國小資訊老師 @ Google Gemini 協作設計 ｜ v13.9.7 ｜
+    車城國小資訊老師 @ Google Gemini 協作設計 ｜ v13.10.0 ｜
     <a href="https://github.com/st887105/20260404" target="_blank"><i class="fa-brands fa-github me-1"></i>原始碼</a>
   </div>
 </footer>
@@ -817,16 +864,8 @@ const API = {
     }
   },
 
-  // ==========================================
-  // ⭐ v13.9.4 核心修正：_callDirect
-  //   Worker（加 cache:no-store + _t 繞快取）→ 失敗才降級 JSONP
-  //   所有需要「即時讀取最新資料」的函式改用此方法
-  //   修正 Worker 524 逾時時 loadTasksForLogin / loadBankStatus 空白問題
-  // ==========================================
   _callDirect: async (action, data = {}) => {
     const payloadStr = JSON.stringify({ action, data });
-
-    // 1. 優先：Worker + 時間戳繞快取
     try {
       const workerResp = await fetch(
         WORKER_URL + '?payload=' + encodeURIComponent(payloadStr) + '&_t=' + Date.now(),
@@ -839,8 +878,6 @@ const API = {
     } catch(workerErr) {
       console.warn('[callDirect] Worker 失敗，降級 JSONP：', workerErr.message);
     }
-
-    // 2. 降級：JSONP 直連 GAS（加 _t 避免瀏覽器 script 快取）
     return new Promise((resolve, reject) => {
       const cbName = '_gas_direct_' + Date.now() + '_' + Math.floor(Math.random() * 99999);
       let isDone = false;
@@ -870,12 +907,6 @@ const API = {
     });
   },
 
-  // ==========================================
-  // ⭐ v13.9.5 新增：_callJsonpOnly
-  //   完全跳過 Cloudflare Worker（避免 CDN 快取問題）
-  //   直接用 JSONP 打 GAS，確保每次都拿到最新資料
-  //   適用於：loadBankStatus、loadTasksForLogin
-  // ==========================================
   _callJsonpOnly: (action, data = {}) => {
     const payloadStr = JSON.stringify({ action, data });
     return new Promise((resolve, reject) => {
@@ -958,6 +989,11 @@ const API = {
   saveWorksheetToCloud:(n,g,s,h)=>API._call('saveWorksheetToCloud',{taskName:n,grade:g,subject:s,htmlContent:h}),
   getWorksheetFromCloud:(n,g,s)=>API._call('getWorksheetFromCloud',{taskName:n,grade:g,subject:s}),
   deleteTask:(n,pwd)=>API._call('deleteTask',{taskName:n,pwd}),
+  // ⭐ v13.10.0 新增：取得補救練習設定
+  getPracticeSettings:()=>API._call('getPracticeSettings'),
+  savePracticeSettings:(nodeCount,qCount,pwd)=>API._call('savePracticeSettings',{nodeCount,qCount,pwd}),
+  // ⭐ v13.10.0 新增：Claude 題目回存 Bank
+  saveBatchFromWorker:(taskName,questions)=>API._call('saveBatchFromWorker',{taskName,questions}),
   generateAllBatchClaude: async (nodes, grade, subject) => {
     return API._callClaude('questions', { nodes, grade, subject, qcount: 3 });
   },
@@ -1006,7 +1042,6 @@ function isValidNode(val){const s=String(val||'').trim();if(!s||['-','未診斷'
 // 🚀 初始化
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
-  // v13.9.6 fix: 強制清除舊 localStorage GAS URL，確保使用最新 DEFAULT_GAS_URL
   try {
     const storedDefault = localStorage.getItem('gasUrlDefault');
     if (!storedDefault || storedDefault !== DEFAULT_GAS_URL) {
@@ -1197,12 +1232,13 @@ async function wizardCreateAndGenerate() {
       const result = await API.generateAllBatchClaude(effectiveNodes, grade, subject);
       if (pBar) pBar.style.width = '100%';
       if (pMsg) pMsg.innerHTML = `🎉 Claude Worker 完成！耗時 <b>${elapsedStr()}</b>`;
+      // ⭐ v13.10.0：Claude Worker 題目回存 Bank
       if (result && result.questions && result.questions.length) {
         try {
-          await API._call('saveBatchFromWorker', { taskName, questions: result.questions });
+          await API.saveBatchFromWorker(taskName, result.questions);
+          console.log('[Claude] 題目已回存 Bank，共', result.questions.length, '題');
         } catch(saveErr) {
-          // GAS 不支援 saveBatchFromWorker，此為預期行為，不影響出題
-          console.log('[Claude] 題目已由 Worker 生成，GAS 端無需存回。');
+          console.warn('[Claude] 回存 Bank 失敗（GAS 端可能未部署 saveBatchFromWorker）：', saveErr.message);
         }
       }
     } else {
@@ -1228,7 +1264,6 @@ async function wizardCreateAndGenerate() {
     if (pMsg) pMsg.innerHTML = `🎉 完成！耗時 <b>${elapsed}</b>`;
     if (pEl) pEl.textContent = '';
 
-    // ⭐ v13.9.5：完成後用 _callJsonpOnly 直打 GAS 確保拿到最新（跳過 Worker 快取）
     app.taskList = await API._callJsonpOnly('getTasks', {});
     populateAdminTaskDropdowns();
     loadBankStatus();
@@ -1244,13 +1279,6 @@ async function wizardCreateAndGenerate() {
 
 // ==========================================
 // 🧑‍🎓 登入與學生功能
-// ==========================================
-
-// ==========================================
-// ⭐ v13.9.4 關鍵修正：loadTasksForLogin
-//   改用 _callDirect（Worker→JSONP 雙保險）
-//   修正 Worker 524 逾時時任務清單空白問題
-//   JSONP 逾時從 15s 放寬到 25s 確保 GAS 有足夠回應時間
 // ==========================================
 async function loadTasksForLogin() {
   const sel = document.getElementById('login-task'), msg = document.getElementById('login-status-msg');
@@ -1304,10 +1332,6 @@ function formatStudentLabel(s) {
   return anon ? `${numStr} ${anon}` : numStr;
 }
 
-// ==========================================
-// ⭐ v13.9.4 關鍵修正：onTaskChange
-//   改用 _callDirect 確保 Worker 524 時有 JSONP fallback
-// ==========================================
 async function onTaskChange() {
   const taskName = document.getElementById('login-task').value;
   const numSel = document.getElementById('login-number');
@@ -1525,12 +1549,14 @@ async function uploadAndGenerate() {
       pBar.style.width = '30%';
       const result = await API.generateAllBatchClaude(effectiveNodes, grade, subject);
       pBar.style.width = '95%';
+      // ⭐ v13.10.0：Claude Worker 題目回存 Bank
       if (result && result.questions && result.questions.length) {
-        pMsg.textContent = '💾 題目存回題庫…';
+        pMsg.textContent = '💾 題目回存 Bank 題庫…';
         try {
-          await API._call('saveBatchFromWorker', { taskName, questions: result.questions });
+          await API.saveBatchFromWorker(taskName, result.questions);
+          console.log('[Claude] 題目已回存 Bank，共', result.questions.length, '題');
         } catch(saveErr) {
-          console.log('[Claude] 題目已由 Worker 生成。');
+          console.warn('[Claude] 回存 Bank 失敗：', saveErr.message);
         }
       }
     } else {
@@ -1555,7 +1581,6 @@ async function uploadAndGenerate() {
     pMsg.innerHTML = `🎉 完成！耗時 <b>${elapsed}</b>`;
     pEl.textContent = '';
 
-    // ⭐ v13.9.5：完成後用 _callJsonpOnly 直打 GAS 確保拿到最新（跳過 Worker 快取）
     app.taskList = await API._callJsonpOnly('getTasks', {});
     populateAdminTaskDropdowns();
     loadBankStatus();
@@ -1581,12 +1606,6 @@ async function clearNodeBank() {
 
 // ==========================================
 // 📚 題庫管理
-// ==========================================
-
-// ==========================================
-// ⭐ v13.9.4 關鍵修正：loadBankStatus
-//   改用 _callDirect（Worker→JSONP 雙保險）
-//   修正題庫管理點開後任務卡片不顯示問題
 // ==========================================
 async function loadBankStatus() {
   const area = document.getElementById('bank-status');
@@ -1753,13 +1772,12 @@ async function regenTask(taskName) {
 }
 
 // ==========================================
-// 📊 分析與學習單
+// 📊 成績
 // ==========================================
 async function loadResults() {
   const taskName = document.getElementById('results-task').value, area = document.getElementById('results-area');
   if (!taskName) { area.innerHTML = ''; return; } area.innerHTML = '<div class="text-muted small">載入中…</div>';
   try {
-    // v13.9.7 fix: 改用 _callJsonpOnly 確保成績即時同步，不受 Worker 快取影響
     const results = await API._callJsonpOnly('getTaskResults', { taskName });
     if (!results.length) { area.innerHTML = '<p class="text-muted">此任務尚無作答紀錄。</p>'; return; }
     const avg = Math.round(results.reduce((s, r) => s + r.score, 0) / results.length), high = Math.max(...results.map(r => r.score)), low = Math.min(...results.map(r => r.score));
@@ -1771,38 +1789,20 @@ async function loadResults() {
       <tr id="detail-row-${ri}" class="result-detail-row" style="display:none;"><td colspan="6" class="p-0"><div class="p-2">${(r.details || []).map((d, di) => `<div class="d-flex align-items-start gap-2 p-2 rounded mb-1 ${d.correct ? 'bg-light' : 'bg-danger bg-opacity-10'}"><span>${d.correct ? '✅' : '❌'}</span><div class="small flex-grow-1"><div class="fw-bold">第${di + 1}題【${esc(d.node || '—')}】Level ${d.level || '?'}</div><div class="text-muted" style="white-space:pre-wrap;word-break:break-word;">${esc(d.text || '—')}</div><div>作答：<b>${esc(d.selected || '—')}</b>　正解：<b class="text-success">${esc(d.answer || '—')}</b></div></div></div>`).join('')}</div></td></tr>`;
     });
     html += '</tbody></table></div>';
-    const demoUrl = `${window.location.origin}${window.location.pathname}?demo=${encodeURIComponent(taskName)}`;
-    const practiceUrl = `${window.location.origin}${window.location.pathname}?practice=${encodeURIComponent(taskName)}`;
-    html += `<div class="mt-3 p-3 border rounded bg-light">
-      <div class="fw-bold small mb-2"><i class="fa-solid fa-chalkboard-teacher text-primary me-1"></i>老師工具列</div>
-      <div class="mb-2 p-2 border border-success rounded" style="background:#f1f8e9;">
-        <div class="small fw-bold text-success mb-1"><i class="fa-solid fa-chalkboard-teacher me-1"></i>教師示範討論連結 <span style="background:#2e7d32;color:#fff;font-size:.7rem;padding:2px 8px;border-radius:6px;margin-left:4px;">無答案｜課堂討論用</span></div>
-        <div class="d-flex gap-2 flex-wrap align-items-center">
-          <a href="${demoUrl}" target="_blank" class="btn btn-success btn-sm"><i class="fa-solid fa-external-link-alt me-1"></i>開啟示範討論頁</a>
-          <button class="btn btn-outline-success btn-sm" onclick="copyText('${demoUrl}')"><i class="fa-solid fa-copy me-1"></i>複製</button>
-        </div>
-      </div>
-      <div class="p-2 border rounded bg-white">
-        <div class="small fw-bold mb-1"><i class="fa-solid fa-dumbbell text-warning me-1"></i>學生補救練習連結 <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem;">取示範題前2題·不顯示答案</span></div>
-        <div class="small text-muted mb-2">學生點開後可直接作答示範題的前 2 題，完成後顯示提示說明，不計分。</div>
-        <div class="d-flex gap-2 flex-wrap align-items-center">
-          <a href="${practiceUrl}" target="_blank" class="btn btn-warning btn-sm"><i class="fa-solid fa-external-link-alt me-1"></i>開啟補救練習</a>
-          <button class="btn btn-outline-secondary btn-sm" onclick="copyText('${practiceUrl}')"><i class="fa-solid fa-copy me-1"></i>複製連結</button>
-        </div>
-      </div>
-    </div>
-    <div id="similar-practice-area" class="mt-3"></div>`;
+    html += `<div id="similar-practice-area" class="mt-3"></div>`;
     area.innerHTML = html;
-    // 自動載入類似題補救練習
+    // ⭐ v13.10.0：類似題（含連結）由 genSimilarPractice → _renderSimResult 統一提供
     genSimilarPractice(taskName, false);
   } catch(e) { area.innerHTML = `<p class="text-danger">載入失敗：${e.message}</p>`; }
 }
 
+// ==========================================
+// 🔍 差異化分析與學習單
+// ==========================================
 async function loadAnalysis() {
   const taskName = document.getElementById('analysis-task').value, area = document.getElementById('analysis-area');
   if (!taskName) { area.innerHTML = ''; return; } area.innerHTML = '<div class="text-muted small">分析中…</div>';
   try {
-    // v13.9.7 fix: 改用 _callJsonpOnly 確保差異化分析即時同步
     const nodes = await API._callJsonpOnly('analyzeClassWeakNodes', { taskName });
     if (!nodes.length) { area.innerHTML = '<p class="text-muted">此任務尚無足夠作答資料。</p>'; return; }
     let html = '<div class="row g-3">';
@@ -1829,6 +1829,8 @@ async function loadAnalysis() {
         document.getElementById('ws-state-done').style.display = '';
         document.getElementById('ws-preview-area').style.display = 'none';
         document.getElementById('ws-toggle-btn').innerHTML = '<i class="fa-solid fa-eye me-1"></i>展開預覽';
+        // ⭐ v13.10.0：顯示 Drive 連結（若有）
+        _showWsDriveLink(stored.fileUrl || null);
         const wsCard = wsArea.querySelector('.ws-mgmt-card');
         if (wsCard) {
           const old = wsCard.querySelector('.ws-cloud-badge'); if (old) old.remove();
@@ -1844,6 +1846,24 @@ async function loadAnalysis() {
   } catch(e) { area.innerHTML = `<p class="text-danger">分析失敗：${e.message}</p>`; }
 }
 
+// ⭐ v13.10.0：Drive 連結顯示輔助函式
+function _showWsDriveLink(fileUrl) {
+  const linkArea = document.getElementById('ws-drive-link-area');
+  const linkAnchor = document.getElementById('ws-drive-link-anchor');
+  const warnArea = document.getElementById('ws-drive-link-warn');
+  if (!linkArea || !linkAnchor || !warnArea) return;
+  if (fileUrl && fileUrl.startsWith('http')) {
+    linkAnchor.href = fileUrl;
+    linkArea.style.display = '';
+    warnArea.style.display = 'none';
+  } else {
+    linkArea.style.display = 'none';
+    // 只在已顯示 ws-state-done 時才顯示警告
+    const done = document.getElementById('ws-state-done');
+    warnArea.style.display = (done && done.style.display !== 'none') ? '' : 'none';
+  }
+}
+
 function _resetWorksheetArea() {
   document.getElementById('ws-state-idle').style.display = '';
   document.getElementById('ws-state-done').style.display = 'none';
@@ -1851,6 +1871,11 @@ function _resetWorksheetArea() {
   document.getElementById('ws-preview-area').style.display = 'none';
   const btn = document.getElementById('ws-toggle-btn');
   if (btn) btn.innerHTML = '<i class="fa-solid fa-eye me-1"></i>展開預覽';
+  // ⭐ v13.10.0 重置 Drive 連結區
+  const linkArea = document.getElementById('ws-drive-link-area');
+  const warnArea = document.getElementById('ws-drive-link-warn');
+  if (linkArea) linkArea.style.display = 'none';
+  if (warnArea) warnArea.style.display = 'none';
   app.wsHtml = ''; app.wsPreviewOpen = false;
   const frame = document.getElementById('ws-preview-frame');
   if (frame) { if (frame._blobUrl) { URL.revokeObjectURL(frame._blobUrl); frame._blobUrl = null; } frame.src = 'about:blank'; frame.srcdoc = ''; }
@@ -1879,6 +1904,11 @@ async function genWorksheet() {
   document.getElementById('ws-state-done').style.display = 'none';
   document.getElementById('ws-gen-progress').style.display = '';
   document.getElementById('ws-preview-area').style.display = 'none';
+  // ⭐ v13.10.0 重置 Drive 連結
+  const linkArea = document.getElementById('ws-drive-link-area');
+  const warnArea = document.getElementById('ws-drive-link-warn');
+  if (linkArea) linkArea.style.display = 'none';
+  if (warnArea) warnArea.style.display = 'none';
   app.wsPreviewOpen = false;
   const progBar = document.getElementById('ws-progress-bar'), progMsg = document.getElementById('ws-progress-msg');
   progBar.style.width = '10%'; progMsg.textContent = WAITING_MSGS[0]; _waitStart = Date.now();
@@ -1895,15 +1925,39 @@ async function genWorksheet() {
     clearInterval(rot); clearInterval(tick);
     progBar.style.width = '100%'; progMsg.textContent = '✅ 學習單生成完成！';
     app.wsHtml = _sanitizeWsHtml(htmlContent);
+
+    // ⭐ v13.10.0：存雲端並取得 Drive 連結
+    let driveFileUrl = null;
     if (taskName) {
-      API.saveWorksheetToCloud(taskName, grade, subject, app.wsHtml)
-        .then(r => { if (r && r.saved) console.log('[Worksheet] 已儲存至雲端'); })
-        .catch(e => console.warn('[Worksheet] 雲端儲存失敗：' + e.message));
+      try {
+        const saveResult = await API.saveWorksheetToCloud(taskName, grade, subject, app.wsHtml);
+        // GAS v13.10.0 回傳 { saved: true, fileUrl: '...', fileId: '...' }
+        if (saveResult && saveResult.fileUrl) {
+          driveFileUrl = saveResult.fileUrl;
+          console.log('[Worksheet] 已儲存至 Google Drive：', driveFileUrl);
+        } else {
+          console.log('[Worksheet] 已儲存至 ScriptProperties（無 Drive URL）');
+        }
+      } catch(e) {
+        console.warn('[Worksheet] 雲端儲存失敗：' + e.message);
+      }
     }
+
     document.getElementById('ws-state-done').style.display = '';
     document.getElementById('ws-toggle-btn').innerHTML = '<i class="fa-solid fa-eye me-1"></i>展開預覽';
     setTimeout(() => { document.getElementById('ws-gen-progress').style.display = 'none'; }, 1800);
-    Swal.fire({ icon: 'success', title: '學習單已生成！', text: '請點「展開預覽」查看，或選擇教師版/學生版列印。', timer: 2500, showConfirmButton: false });
+
+    // 顯示 Drive 連結或警告
+    _showWsDriveLink(driveFileUrl);
+
+    Swal.fire({
+      icon: 'success',
+      title: '學習單已生成！',
+      html: driveFileUrl
+        ? `請點「展開預覽」查看，或選擇教師版/學生版列印。<br><a href="${driveFileUrl}" target="_blank" class="btn btn-sm btn-success mt-2"><i class="fa-brands fa-google-drive me-1"></i>開啟 Google Drive 備份</a>`
+        : '請點「展開預覽」查看，或選擇教師版/學生版列印。',
+      timer: 3000, showConfirmButton: false
+    });
   } catch(e) {
     clearInterval(rot); clearInterval(tick);
     document.getElementById('ws-gen-progress').style.display = 'none';
@@ -1917,6 +1971,11 @@ async function genWorksheet() {
   }
 }
 
+// ==========================================
+// ⭐ v13.10.0 重構：_renderSimResult
+//   整合示範討論連結 & 補救練習連結，不另外產生
+//   類似題生成後嘗試回存 Bank（_saveSimilarToBank）
+// ==========================================
 async function genSimilarPractice(taskName, forceRegen) {
   const area = document.getElementById('similar-practice-area'); if (!area) return;
   if (!forceRegen && app_sim.data && app_sim.taskName === taskName) { _renderSimResult(area, app_sim.data, taskName); return; }
@@ -1930,7 +1989,6 @@ async function genSimilarPractice(taskName, forceRegen) {
     const data = await API.getPracticeQuestionsForErrors(taskName);
     clearInterval(tick); clearInterval(timerTick); stopProgress();
     if (!data || !data.length) {
-      // 診斷：檢查原因
       let reason = '尚無足夠錯題資料';
       try {
         const results = await API._callJsonpOnly('getTaskResults', { taskName });
@@ -1945,7 +2003,6 @@ async function genSimilarPractice(taskName, forceRegen) {
           }
         }
       } catch(e) { reason = '⚠️ 診斷失敗：' + e.message; }
-      // 取得任務的弱點節點
       let errorNodes = [];
       try {
         const rr = await API._callJsonpOnly('getTaskResults', { taskName });
@@ -1955,10 +2012,12 @@ async function genSimilarPractice(taskName, forceRegen) {
         }));
         errorNodes = Object.keys(nodeMap).sort((a,b)=>nodeMap[b]-nodeMap[a]).slice(0,3);
       } catch(e) {}
-      
       const safeId = 'genBtn_' + Date.now();
       const genBtn = errorNodes.length ? safeId : '';
-      area.innerHTML = `<div class="alert alert-info small py-2"><i class="fa-solid fa-circle-info me-1"></i>${reason}${genBtn ? '<br><button id="' + genBtn + '" class="btn btn-warning btn-sm mt-2"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>立即 AI 生成類似題</button>' : ''}</div>`;
+      // ⭐ v13.10.0：無類似題時仍顯示連結
+      area.innerHTML = `
+        ${_buildLinkCards(taskName)}
+        <div class="alert alert-info small py-2 mt-2"><i class="fa-solid fa-circle-info me-1"></i>${reason}${genBtn ? '<br><button id="' + genBtn + '" class="btn btn-warning btn-sm mt-2"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>立即 AI 生成類似題</button>' : ''}</div>`;
       if (genBtn) {
         document.getElementById(genBtn).addEventListener('click', function() {
           genSimilarOnDemand(taskName, errorNodes, this);
@@ -1971,31 +2030,63 @@ async function genSimilarPractice(taskName, forceRegen) {
   } catch(e) {
     clearInterval(tick); clearInterval(timerTick); stopProgress();
     let errMsg = e.message || String(e);
-    // JSON parse 失敗 → 通常是 GAS 未部署新版
     if (errMsg.includes('end of input') || errMsg.includes('JSON') || errMsg.includes('parse')) {
-      errMsg = 'GAS 回應格式錯誤，請確認已部署最新版 GAS（重新部署並選「執行為我」、「任何人」）';
+      errMsg = 'GAS 回應格式錯誤，請確認已部署最新版 GAS';
     }
-    area.innerHTML = `<div class="alert alert-danger small py-2"><i class="fa-solid fa-triangle-exclamation me-1"></i>${errMsg}</div>`;
+    area.innerHTML = `${_buildLinkCards(taskName)}<div class="alert alert-danger small py-2 mt-2"><i class="fa-solid fa-triangle-exclamation me-1"></i>${errMsg}</div>`;
   }
 }
 
+// ⭐ v13.10.0 新增：統一產生示範討論 + 補救練習連結卡片 HTML
+function _buildLinkCards(taskName) {
+  const demoUrl     = `${window.location.origin}${window.location.pathname}?demo=${encodeURIComponent(taskName)}`;
+  const practiceUrl = `${window.location.origin}${window.location.pathname}?practice=${encodeURIComponent(taskName)}`;
+  return `
+  <div class="demo-link-card mb-2">
+    <div class="fw-bold small text-success mb-1">
+      <i class="fa-solid fa-chalkboard-teacher me-1"></i>教師示範討論連結
+      <span class="badge bg-success ms-1" style="font-size:.65rem;">無答案｜課堂討論用</span>
+    </div>
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+      <a href="${demoUrl}" target="_blank" class="btn btn-success btn-sm"><i class="fa-solid fa-external-link-alt me-1"></i>開啟示範討論頁</a>
+      <button class="btn btn-outline-success btn-sm" onclick="copyText('${demoUrl.replace(/'/g,"\\'")}')"><i class="fa-solid fa-copy me-1"></i>複製連結</button>
+      <span class="small text-muted text-truncate" style="max-width:280px;">${demoUrl}</span>
+    </div>
+  </div>
+  <div class="practice-link-card mb-2">
+    <div class="fw-bold small text-warning mb-1">
+      <i class="fa-solid fa-dumbbell me-1"></i>學生補救練習連結
+      <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem;">不顯示答案・不計分</span>
+    </div>
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+      <a href="${practiceUrl}" target="_blank" class="btn btn-warning btn-sm"><i class="fa-solid fa-external-link-alt me-1"></i>開啟補救練習</a>
+      <button class="btn btn-outline-secondary btn-sm" onclick="copyText('${practiceUrl.replace(/'/g,"\\'")}')"><i class="fa-solid fa-copy me-1"></i>複製連結</button>
+      <span class="small text-muted text-truncate" style="max-width:280px;">${practiceUrl}</span>
+    </div>
+  </div>`;
+}
+
 function _renderSimResult(area, data, taskName) {
-  const shareUrl = `${window.location.origin}${window.location.pathname}?practice=${encodeURIComponent(taskName)}`;
   let previewHtml = '';
   data.forEach(item => {
-    previewHtml += `<div class="card mb-3 border-warning"><div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center"><span class="fw-bold small">【${esc(item.node)}】</span><span class="badge bg-danger">${item.errorCount} 位學生答錯</span></div><div class="card-body p-2">`;
+    previewHtml += `<div class="card mb-3 border-warning"><div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center"><span class="fw-bold small">【${esc(item.node)}】</span><span class="badge bg-danger">${item.errorCount || item.questions?.length || 0} 筆錯誤</span></div><div class="card-body p-2">`;
     (item.questions || []).forEach((q, qi) => {
-      const lvBg = { A: '#d32f2f', B: '#f57c00', C: '#388e3c', D: '#1565c0' }, lv = (q.hint?.match(/Level ([ABCD])/) || [])[1] || 'D';
+      const lvBg = { A: '#d32f2f', B: '#f57c00', C: '#388e3c', D: '#1565c0' }, lv = (q.hint?.match(/Level ([ABCD])/) || [])[1] || q.level || 'D';
       previewHtml += `<div class="border rounded p-2 mb-2"><div class="d-flex justify-content-between align-items-start mb-1"><span class="small text-muted fw-bold">類似題 ${qi + 1}</span><span class="badge text-white" style="background:${lvBg[lv] || '#9e9e9e'}">Level ${lv}</span></div><div class="small mb-2" style="white-space:pre-wrap;word-break:break-word;line-height:1.6">${esc(q.text)}</div>${q.type === 'single' ? (q.options || []).map((o, oi) => { const isAns = 'ABCD'[oi] === q.answer; return `<div class="d-flex align-items-start gap-1 py-1 border-bottom"><span class="badge ${isAns ? 'bg-success' : 'bg-light text-dark border'} flex-shrink-0">${'ABCD'[oi]}</span><span class="small">${esc(o)}</span></div>`; }).join('') : ''}<div class="small text-success mt-2 fw-bold">✅ 正解：${esc(q.answer)}</div>${q.hint ? `<div class="small text-secondary mt-1">💡 ${esc(q.hint.replace(/^\[Level [ABCD]\]\s*/, ''))}</div>` : ''}</div>`;
     });
     previewHtml += `</div></div>`;
   });
   const escapedTask = taskName.replace(/'/g, "\\'");
-  area.innerHTML = `<div class="alert alert-success mt-3 d-flex justify-content-between align-items-center flex-wrap gap-2"><div><strong>🔗 學生補救練習專屬連結：</strong><br><a href="${shareUrl}" target="_blank" class="small">${shareUrl}</a></div><button class="btn btn-sm btn-success" onclick="navigator.clipboard.writeText('${shareUrl}').then(()=>Swal.fire({title:'已複製連結',timer:1000,showConfirmButton:false}))"><i class="fa-solid fa-copy me-1"></i>複製</button></div>
-    <div class="d-flex gap-2 flex-wrap align-items-center mb-2 mt-3"><h6 class="fw-bold mb-0"><i class="fa-solid fa-dumbbell text-warning me-1"></i>錯誤類似題（共 ${data.length} 個節點）</h6><button class="btn btn-outline-secondary btn-sm" id="sim-toggle-btn" onclick="toggleSimPreview()"><i class="fa-solid fa-eye me-1"></i>展開預覽</button><button class="btn btn-outline-warning btn-sm" onclick="genSimilarPractice('${escapedTask}', true)"><i class="fa-solid fa-rotate me-1"></i>重新生成</button></div>
+  // ⭐ v13.10.0：連結卡片統一由 _buildLinkCards 提供，不另外在此產生
+  area.innerHTML = `
+    ${_buildLinkCards(taskName)}
+    <div class="d-flex gap-2 flex-wrap align-items-center mb-2 mt-3">
+      <h6 class="fw-bold mb-0"><i class="fa-solid fa-dumbbell text-warning me-1"></i>錯誤類似題（共 ${data.length} 個節點）</h6>
+      <button class="btn btn-outline-secondary btn-sm" id="sim-toggle-btn" onclick="toggleSimPreview()"><i class="fa-solid fa-eye me-1"></i>展開預覽</button>
+      <button class="btn btn-outline-warning btn-sm" onclick="genSimilarPractice('${escapedTask}', true)"><i class="fa-solid fa-rotate me-1"></i>重新生成</button>
+    </div>
     <div id="sim-preview-area" style="display:none;"><div class="border rounded p-3 bg-white">${previewHtml}</div></div>`;
   app_sim.previewOpen = false;
-  // 自動展開預覽
   setTimeout(() => {
     const prev = document.getElementById('sim-preview-area');
     const btn = document.getElementById('sim-toggle-btn');
@@ -2007,19 +2098,25 @@ function _renderSimResult(area, data, taskName) {
   }, 100);
 }
 
-// 透過 Claude Worker 即時生成類似題
+// ⭐ v13.10.0：類似題回存 Bank 輔助
+async function _saveSimilarToBank(taskName, questions) {
+  if (!questions || !questions.length) return;
+  try {
+    await API.saveBatchFromWorker(taskName, questions);
+    console.log('[類似題] 已回存 Bank，共', questions.length, '題');
+  } catch(e) {
+    console.warn('[類似題] 回存 Bank 失敗（GAS 端可能未部署 saveBatchFromWorker）：', e.message);
+  }
+}
+
 async function _genSimilarViaClaude(taskName, nodes) {
   const workerUrl = app.claudeWorkerUrl || DEFAULT_CLAUDE_WORKER_URL;
-  // 取得任務的 grade/subject
   let grade = '三年級', subject = '數學';
   try {
     const tasks = await API._callJsonpOnly('getTasks', {});
     const t = (tasks || []).find(t => t.taskName === taskName);
     if (t) { grade = t.grade || grade; subject = t.subject || subject; }
   } catch(e) {}
-
-  const nodeList = nodes.slice(0, 3).map((n, i) => (i + 1) + '. [' + n + ']').join('\n');
-  const prompt = '你是一位台灣小學' + subject + '老師，請針對以下弱點節點，為' + grade + '學生出 2 題選擇題（每題 4 選項）作為補救練習。\n節點：\n' + nodeList + '\n\n請用 JSON 陣列回傳，格式：[{"node":"節點名","text":"題目","options":["A...","B...","C...","D..."],"answer":"A","hint":"提示","level":"C"}]，只回傳 JSON 不要其他文字。';
 
   const resp = await fetch(workerUrl, {
     method: 'POST',
@@ -2028,9 +2125,7 @@ async function _genSimilarViaClaude(taskName, nodes) {
   });
   if (!resp.ok) throw new Error('Claude Worker HTTP ' + resp.status);
   const json = await resp.json();
-  // 解析回應
   let questions = [];
-  // Worker questions mode 直接回傳 questions 陣列
   if (json.status === 'success' && Array.isArray(json.questions)) {
     questions = json.questions;
   } else {
@@ -2046,7 +2141,6 @@ async function _genSimilarViaClaude(taskName, nodes) {
 
 async function genSimilarOnDemand(taskName, nodes, btn, mode) {
   if (!mode) {
-    // 顯示選擇：Gemini 或 Claude
     const result = await Swal.fire({
       title: '選擇 AI 生成引擎',
       html: '<div class="d-flex flex-column gap-2 mt-2">' +
@@ -2057,7 +2151,7 @@ async function genSimilarOnDemand(taskName, nodes, btn, mode) {
       showCancelButton: true,
       cancelButtonText: '取消',
       didOpen: () => {
-        document.getElementById('swal-gemini').onclick = () => Swal.clickConfirm() || (Swal._selectedMode = 'gemini', Swal.close());
+        document.getElementById('swal-gemini').onclick = () => (Swal._selectedMode = 'gemini', Swal.close());
         document.getElementById('swal-claude').onclick = () => (Swal._selectedMode = 'claude', Swal.close());
       }
     });
@@ -2080,9 +2174,11 @@ async function genSimilarOnDemand(taskName, nodes, btn, mode) {
       if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles me-1"></i>立即 AI 生成類似題'; }
       return Swal.fire({ icon: 'warning', title: '生成失敗', text: 'AI 未能生成題目，請稍後再試。' });
     }
-    // 組合成 _renderSimResult 格式
+    // ⭐ v13.10.0：回存 Bank
+    await _saveSimilarToBank(taskName, questions);
+
     const nodeMap = {};
-    questions.forEach((q, qi) => {
+    questions.forEach(q => {
       const nodeKey = q.node || nodes[0] || '補救練習';
       if (!q.node) q.node = nodeKey;
       if (!nodeMap[nodeKey]) nodeMap[nodeKey] = { node: nodeKey, errorCount: 1, questions: [] };
@@ -2291,7 +2387,7 @@ async function finishQuiz() {
 }
 
 // ==========================================
-// 🏋️ 補救練習頁（取示範題前2題，不顯示答案）
+// 🏋️ 補救練習頁
 // ==========================================
 const _practiceAnswers = {};
 
@@ -2411,7 +2507,7 @@ function submitPractice() {
 }
 
 // ==========================================
-// 🖥️ 教師示範討論頁（無答案）
+// 🖥️ 教師示範討論頁
 // ==========================================
 async function loadDemoView(taskName) {
   const infoEl = document.getElementById('demo-task-info');
@@ -2500,13 +2596,22 @@ async function loadSettingsTab() {
     document.getElementById('setting-quiz-count').value = settings.quizCount;
     document.getElementById('setting-folder-id').value = folderId || '';
     document.getElementById('setting-help-url').value = helpUrl || '';
+
+    // ⭐ v13.10.0：載入補救練習設定
+    try {
+      const ps = await API.getPracticeSettings();
+      if (ps) {
+        document.getElementById('setting-practice-node-count').value = ps.nodeCount || 3;
+        document.getElementById('setting-practice-q-count').value = ps.qCount || 3;
+      }
+    } catch(e) {}
+
     const modelSel = document.getElementById('setting-gemini-model');
-    const savedModel = gemini.model || 'gemma-4-31b-it';
-    if (![...modelSel.options].some(o => o.value === savedModel)) {
+    const savedModel = gemini.model || 'gemini-2.0-flash';
+    const knownModels = [...modelSel.options].map(o => o.value).filter(v => v !== '__custom__');
+    if (!knownModels.includes(savedModel)) {
       const opt = document.createElement('option'); opt.value = savedModel; opt.textContent = savedModel + '（自訂）'; modelSel.appendChild(opt);
     }
-    // 若已儲存的模型不在選單中，加入自訂選項並顯示輸入框
-    const knownModels = [...modelSel.options].map(o => o.value).filter(v => v !== '__custom__');
     if (knownModels.includes(savedModel)) {
       modelSel.value = savedModel;
     } else {
@@ -2536,6 +2641,21 @@ async function saveHelpUrl() {
   const url = document.getElementById('setting-help-url').value.trim();
   try { const msg = await API.updateHelpUrl(url, app.adminPwd); Swal.fire({ icon: 'success', title: msg, timer: 1500, showConfirmButton: false }); } catch(e) { Swal.fire({ icon: 'error', title: '儲存失敗', text: e.message }); }
 }
+
+// ⭐ v13.10.0：儲存補救練習設定
+async function savePracticeSettings() {
+  const nodeCount = parseInt(document.getElementById('setting-practice-node-count').value, 10) || 3;
+  const qCount = parseInt(document.getElementById('setting-practice-q-count').value, 10) || 3;
+  if (nodeCount < 1 || nodeCount > 10) return Swal.fire({ icon: 'warning', title: '節點數請輸入 1~10' });
+  if (qCount < 1 || qCount > 10) return Swal.fire({ icon: 'warning', title: '題數請輸入 1~10' });
+  try {
+    const msg = await API.savePracticeSettings(nodeCount, qCount, app.adminPwd);
+    Swal.fire({ icon: 'success', title: msg || '✅ 補救練習設定已儲存', timer: 1500, showConfirmButton: false });
+  } catch(e) {
+    Swal.fire({ icon: 'error', title: '儲存失敗', text: e.message });
+  }
+}
+
 function onModelSelectChange() {
   const sel = document.getElementById('setting-gemini-model');
   const customRow = document.getElementById('custom-model-row');
